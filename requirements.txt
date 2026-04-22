@@ -1,0 +1,12 @@
+fastapi[all]
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+playwright
+pydantic-settings
+jinja2
+python-multipart
+yt-dlp
+alembic
+psycopg2-binary
+bcrypt

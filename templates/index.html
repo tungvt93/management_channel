@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channel Content Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Channel Manager</h1>
+            <div class="header-actions">
+                <div class="stats">
+                    <span id="video-count">Total Videos: {{ total_count }}</span>
+                </div>
+                <a href="/logout">Đăng xuất</a>
+            </div>
+        </header>
+
+        <section class="card">
+            <h2>Add New Channel</h2>
+            <form id="add-channel-form" class="form-group">
+                <input type="text" id="channel-url" placeholder="Paste YouTube or TikTok channel URL here..." required>
+                <button type="submit">Add & Scrape</button>
+            </form>
+        </section>
+
+        <div class="grid">
+            <section>
+                <h2>Channels</h2>
+                <div class="channel-list">
+                    {% for channel in channels %}
+                    <div class="item" id="channel-{{ channel.id }}">
+                        {% set ss = channel.scraping_status if channel.scraping_status is string else channel.scraping_status.value %}
+                        <div class="item-info">
+                            <a href="{{ channel.url }}" target="_blank" class="item-url">{{ channel.url }}</a>
+                            <div class="item-meta">
+                                <span class="badge badge-{{ channel.platform.value }}">{{ channel.platform.value }}</span>
+                                <span class="badge badge-scraping-{{ ss }}" id="status-{{ channel.id }}">
+                                    {% if ss == 'in_progress' %}⏳ Đang quét...{% elif ss == 'success' %}✅ Hoàn thành{% elif ss == 'failed' %}❌ Thất bại{% else %}⬜ Chờ{% endif %}
+                                </span>
+                                {% if channel.last_scraped_at %}
+                                <span class="text-muted">Quét lúc: {{ channel.last_scraped_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                {% endif %}
+                                {% if channel.scraping_error %}
+                                <span class="text-error" title="{{ channel.scraping_error }}">⚠️ Lỗi</span>
+                                <span class="scraping-err-msg">{{ channel.scraping_error[:400] }}{% if channel.scraping_error|length > 400 %}…{% endif %}</span>
+                                {% endif %}
+                                Added {{ channel.created_at.strftime('%Y-%m-%d') }}
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            <button type="button" class="btn-rescrape" onclick="rescrapeChannel({{ channel.id }}, this)">Quét lại</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section>
+                <div class="section-header">
+                    <h2>Video Links</h2>
+                    <select id="channel-filter" class="form-select" onchange="filterByChannel(this.value)">
+                        <option value="">All Channels</option>
+                        {% for channel in channels %}
+                        <option value="{{ channel.id }}" {% if selected_channel == channel.id %}selected{% endif %}>{{ channel.url }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="video-list">
+                    {% for video in videos %}
+                    <div class="item">
+                        <div class="item-info">
+                            <a href="{{ video.url }}" target="_blank" class="item-url">{{ video.url }}</a>
+                            <div class="item-meta">
+                                <span>Uploaded: {{ video.upload_date.strftime('%Y-%m-%d %H:%M') if video.upload_date else 'Unknown' }}</span>
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            <select class="status-select" onchange="updateStatus({{ video.id }}, this.value)">
+                                <option value="available" {% if video.status.value == 'available' %}selected{% endif %}>Available</option>
+                                <option value="holded" {% if video.status.value == 'holded' %}selected{% endif %}>Holded</option>
+                                <option value="done" {% if video.status.value == 'done' %}selected{% endif %}>Done</option>
+                            </select>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                {% if total_pages > 1 %}
+                <div class="pagination">
+                    <button onclick="changePage({{ current_page - 1 }})" {% if current_page <= 1 %}disabled{% endif %}>Previous</button>
+                    <span class="page-info">Page {{ current_page }} of {{ total_pages }}</span>
+                    <button onclick="changePage({{ current_page + 1 }})" {% if current_page >= total_pages %}disabled{% endif %}>Next</button>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('add-channel-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('channel-url').value;
+            const btn = e.target.querySelector('button');
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+
+            try {
+                const response = await fetch('/api/channels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById('channel-url').value = '';
+                    // Start polling for this channel
+                    startPolling(data.channel_id);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.detail);
+                }
+            } catch (err) {
+                alert('Connection error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add & Scrape';
+            }
+        });
+
+        async function updateStatus(videoId, newStatus) {
+            try {
+                const response = await fetch(`/api/videos/${videoId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                if (response.ok) {
+                    console.log('Status updated');
+                } else {
+                    alert('Update failed');
+                }
+            } catch (err) {
+                alert('Connection error');
+            }
+        }
+        function filterByChannel(channelId) {
+            const url = new URL(window.location);
+            if (channelId) {
+                url.searchParams.set('channel_id', channelId);
+            } else {
+                url.searchParams.delete('channel_id');
+            }
+            url.searchParams.set('page', 1); // Reset to page 1
+            window.location.href = url.toString();
+        }
+
+        function changePage(page) {
+            const url = new URL(window.location);
+            url.searchParams.set('page', page);
+            window.location.href = url.toString();
+        }
+
+        // Polling for in-progress channels
+        const statusLabels = {
+            'idle': '⬜ Chờ',
+            'in_progress': '⏳ Đang quét...',
+            'success': '✅ Hoàn thành',
+            'failed': '❌ Thất bại'
+        };
+
+        function startPolling(channelId) {
+            const interval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/channels/${channelId}/status`);
+                    const data = await resp.json();
+                    const st = typeof data.scraping_status === 'string'
+                        ? data.scraping_status
+                        : (data.scraping_status && data.scraping_status.value) || '';
+                    const badge = document.getElementById(`status-${channelId}`);
+                    if (badge) {
+                        badge.textContent = statusLabels[st] || st;
+                        badge.className = `badge badge-scraping-${st}`;
+                    }
+                    if (st !== 'in_progress') {
+                        clearInterval(interval);
+                        location.reload(); // Refresh to show updated video count
+                    }
+                } catch (e) { clearInterval(interval); }
+            }, 3000);
+        }
+
+        async function rescrapeChannel(channelId, btn) {
+            btn.disabled = true;
+            try {
+                const resp = await fetch(`/api/channels/${channelId}/scrape`, { method: 'POST' });
+                let data = {};
+                try { data = await resp.json(); } catch (e) {}
+                if (resp.status === 409) {
+                    alert(data.detail || 'Quét đang chạy.');
+                    return;
+                }
+                if (!resp.ok) {
+                    const msg = typeof data.detail === 'string'
+                        ? data.detail
+                        : 'Không thể quét lại.';
+                    alert(msg);
+                    return;
+                }
+                const badge = document.getElementById(`status-${channelId}`);
+                if (badge) {
+                    badge.textContent = statusLabels['in_progress'];
+                    badge.className = 'badge badge-scraping-in_progress';
+                }
+                startPolling(channelId);
+            } catch (err) {
+                alert('Lỗi kết nối');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Auto-poll any in-progress channels on load
+        document.querySelectorAll('[id^="status-"]').forEach(el => {
+            if (el.textContent.includes('Đang quét')) {
+                const channelId = el.id.replace('status-', '');
+                startPolling(channelId);
+            }
+        });
+    </script>
+</body>
+</html>
