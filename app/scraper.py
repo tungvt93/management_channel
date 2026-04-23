@@ -156,7 +156,7 @@ async def get_tiktok_videos(channel_url: str):
     try:
         tmp_cookie = _build_tmp_cookie_from_json()
 
-        playlist_end = int(os.getenv("TIKTOK_YTDLP_PLAYLIST_END", "500"))
+        playlist_end = int(os.getenv("TIKTOK_YTDLP_PLAYLIST_END", "2000"))
 
         def _extract(cookiefile: Optional[str]):
             opts: dict = {

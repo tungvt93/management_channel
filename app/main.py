@@ -133,21 +133,30 @@ async def scrape_channel_task(channel_id: int, channel_url: str, platform: Platf
 # 1. API: Get list of available video links
 @app.get(
     "/api/videos",
-    response_model=List[VideoResponse],
-    dependencies=[Depends(require_login_api)],
+    response_model=Optional[VideoResponse],    
 )
 async def get_available_videos(channel_link: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     stmt = select(VideoLink).where(VideoLink.status == VideoStatus.AVAILABLE)
     if channel_link:
         stmt = stmt.join(Channel).where(Channel.url == channel_link)
+    
+    # Lấy 1 bản ghi và lock để tránh race condition
+    stmt = stmt.limit(1).with_for_update(skip_locked=True)
+    
     result = await db.execute(stmt)
-    return result.scalars().all()
+    video = result.scalar_one_or_none()
+    
+    if video:
+        video.status = VideoStatus.HOLDED
+        await db.commit()
+        await db.refresh(video)
+    
+    return video
 
 # 2. API: Update video status
 @app.patch(
     "/api/videos/{video_id}",
-    response_model=VideoResponse,
-    dependencies=[Depends(require_login_api)],
+    response_model=VideoResponse,    
 )
 async def update_video_status(video_id: int, status_update: VideoUpdate, db: AsyncSession = Depends(get_db)):
     stmt = update(VideoLink).where(VideoLink.id == video_id).values(status=status_update.status).returning(VideoLink)
@@ -161,7 +170,7 @@ async def update_video_status(video_id: int, status_update: VideoUpdate, db: Asy
     return updated_video
 
 # 3. API: Add channel and trigger scrape
-@app.post("/api/channels", dependencies=[Depends(require_login_api)])
+@app.post("/api/channels")
 async def add_channel(channel_in: ChannelCreate, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     # Simple platform detection
     url = channel_in.url.lower()
@@ -240,9 +249,9 @@ async def login_page(request: Request):
     if request.session.get("user_id"):
         return RedirectResponse("/", status_code=302)
     return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
+        request=request,
+        name="login.html",
+        context={
             "error": request.query_params.get("error"),
         },
     )
@@ -307,17 +316,20 @@ async def dashboard(
     total_count = total_count_result.scalar()
     total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
     
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "channels": channels,
-        "videos": videos,
-        "selected_channel": channel_id,
-        "current_page": page,
-        "total_pages": total_pages,
-        "total_count": total_count,
-        "Platform": Platform,
-        "VideoStatus": VideoStatus
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "channels": channels,
+            "videos": videos,
+            "selected_channel": channel_id,
+            "current_page": page,
+            "total_pages": total_pages,
+            "total_count": total_count,
+            "Platform": Platform,
+            "VideoStatus": VideoStatus
+        }
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

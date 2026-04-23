@@ -6,13 +6,13 @@ import enum
 Base = declarative_base()
 
 class Platform(str, enum.Enum):
-    YOUTUBE = "YOUTUBE"
-    TIKTOK = "TIKTOK"
+    YOUTUBE = "youtube"
+    TIKTOK = "tiktok"
 
 class VideoStatus(str, enum.Enum):
-    AVAILABLE = "AVAILABLE"
-    HOLDED = "HOLDED"
-    DONE = "DONE"
+    AVAILABLE = "available"
+    HOLDED = "holded"
+    DONE = "done"
 
 class ScrapingStatus(str, enum.Enum):
     IDLE = "idle"
@@ -26,9 +26,9 @@ class Channel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, unique=True, index=True, nullable=False)
-    platform = Column(SQLEnum(Platform, values_callable=lambda x: [e.value for e in x]), nullable=False)
+    platform = Column(SQLEnum(Platform, name="platform", values_callable=lambda x: [e.value for e in x]), nullable=False)
     name = Column(String, nullable=True) # Optional channel name
-    scraping_status = Column(String, default=ScrapingStatus.IDLE.value, nullable=False, server_default=ScrapingStatus.IDLE.value)
+    scraping_status = Column(SQLEnum(ScrapingStatus, name="scrapingstatus", values_callable=lambda x: [e.value for e in x]), default=ScrapingStatus.IDLE, nullable=False, server_default=ScrapingStatus.IDLE.value)
     last_scraped_at = Column(DateTime(timezone=True), nullable=True)
     scraping_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -41,7 +41,7 @@ class VideoLink(Base):
     id = Column(Integer, primary_key=True, index=True)
     channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
     url = Column(String, unique=True, index=True, nullable=False)
-    status = Column(SQLEnum(VideoStatus, values_callable=lambda x: [e.value for e in x]), default=VideoStatus.AVAILABLE, nullable=False)
+    status = Column(SQLEnum(VideoStatus, name="videostatus", values_callable=lambda x: [e.value for e in x]), default=VideoStatus.AVAILABLE, nullable=False)
     upload_date = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
