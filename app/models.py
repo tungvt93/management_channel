@@ -55,3 +55,12 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class TikTokProfile(Base):
+    __tablename__ = "tiktok_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String, unique=True, index=True, nullable=False)
+    followers_count = Column(Integer, default=0)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

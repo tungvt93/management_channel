@@ -5,20 +5,22 @@ from pathlib import Path
 from typing import List, Optional
 
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import func, update
+from sqlalchemy import func, update, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from starlette.middleware.sessions import SessionMiddleware
+import csv
+import io
 
 from .auth import verify_password
 from .database import AsyncSessionLocal, get_db, init_db
-from .models import Channel, Platform, ScrapingStatus, User, VideoLink, VideoStatus
+from .models import Channel, Platform, ScrapingStatus, User, VideoLink, VideoStatus, TikTokProfile
 from .scraper import get_tiktok_videos, get_youtube_videos
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,21 @@ async def require_login_api(request: Request) -> None:
 # Pydantic Schemas
 class ChannelCreate(BaseModel):
     url: str
+
+
+class ChannelResponse(BaseModel):
+    id: int
+    url: str
+    platform: Platform
+    name: Optional[str]
+    scraping_status: ScrapingStatus
+    last_scraped_at: Optional[datetime]
+    scraping_error: Optional[str]
+    created_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
 
 class VideoUpdate(BaseModel):
     status: VideoStatus
@@ -197,6 +214,18 @@ async def add_channel(channel_in: ChannelCreate, background_tasks: BackgroundTas
     
     return {"message": "Channel added and scraping started", "channel_id": channel.id}
 
+
+@app.get(
+    "/api/channels",
+    response_model=List[ChannelResponse],
+    dependencies=[Depends(require_login_api)],
+)
+async def list_channels(db: AsyncSession = Depends(get_db)):
+    """Trả về danh sách tất cả kênh (mới nhất trước)."""
+    result = await db.execute(select(Channel).order_by(Channel.created_at.desc()))
+    return result.scalars().all()
+
+
 # 4. API: Get channel scraping status
 @app.get(
     "/api/channels/{channel_id}/status",
@@ -327,9 +356,98 @@ async def dashboard(
             "total_pages": total_pages,
             "total_count": total_count,
             "Platform": Platform,
-            "VideoStatus": VideoStatus
+            "VideoStatus": VideoStatus,
+            "active_menu": "dashboard"
         }
     )
+
+
+# TikTok Profile Management Routes
+@app.get("/tiktok-profiles")
+async def tiktok_profiles_page(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=302)
+    
+    stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
+    result = await db.execute(stmt)
+    profiles = result.scalars().all()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="tiktok_profiles.html",
+        context={
+            "profiles": profiles,
+            "active_menu": "tiktok"
+        }
+    )
+
+@app.post("/api/tiktok-profiles/import")
+async def import_tiktok_profiles(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api)
+):
+    content = await file.read()
+    decoded = content.decode('utf-8')
+    reader = csv.reader(io.StringIO(decoded))
+    
+    # Assume CSV has headers or not? Let's handle both.
+    # User said: "mỗi row là 1 link kênh tiktok và cột note"
+    # We'll skip header if it looks like one.
+    
+    imported_count = 0
+    for row in reader:
+        if not row or len(row) < 1:
+            continue
+        
+        url = row[0].strip()
+        note = row[1].strip() if len(row) > 1 else ""
+        
+        if not url or url.lower() == "url" or url.lower() == "link":
+            continue # Skip header
+            
+        # Check existence
+        stmt = select(TikTokProfile).where(TikTokProfile.url == url)
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none():
+            continue
+            
+        profile = TikTokProfile(url=url, note=note)
+        db.add(profile)
+        imported_count += 1
+        
+    await db.commit()
+    return {"message": f"Successfully imported {imported_count} profiles"}
+
+@app.post("/api/tiktok-profiles")
+async def add_tiktok_profile(
+    url: str = Form(...),
+    note: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api)
+):
+    stmt = select(TikTokProfile).where(TikTokProfile.url == url)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Profile already exists")
+    
+    profile = TikTokProfile(url=url, note=note)
+    db.add(profile)
+    await db.commit()
+    return RedirectResponse("/tiktok-profiles", status_code=303)
+
+@app.post("/api/tiktok-profiles/{profile_id}/delete")
+async def delete_tiktok_profile(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api)
+):
+    await db.execute(delete(TikTokProfile).where(TikTokProfile.id == profile_id))
+    await db.commit()
+    return RedirectResponse("/tiktok-profiles", status_code=303)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

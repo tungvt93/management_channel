@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok Channel Management - Channel Manager</title>
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Channel Manager</h1>
+            <div class="header-actions">
+                <a href="/logout">Đăng xuất</a>
+            </div>
+        </header>
+
+        <nav>
+            <a href="/" class="{% if active_menu == 'dashboard' %}active{% endif %}">Scraping Manager</a>
+            <a href="/tiktok-profiles" class="{% if active_menu == 'tiktok' %}active{% endif %}">TikTok Channels</a>
+        </nav>
+
+        <div class="grid" style="grid-template-columns: 1fr;">
+            <section class="card">
+                <h2>Import TikTok Channels</h2>
+                <div class="import-section">
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; flex: 1;">
+                        <label for="csv-file">Chọn file CSV</label>
+                        <input type="file" id="csv-file" accept=".csv">
+                        <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">Định dạng: link_kênh, note</span>
+                    </div>
+                    <button type="button" onclick="importCSV()">Import CSV</button>
+                </div>
+                
+                <div style="margin: 3rem 0 2rem; display: flex; align-items: center; gap: 1rem;">
+                    <div style="flex: 1; height: 1px; background: var(--border);"></div>
+                    <span class="text-muted" style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;">Hoặc thêm thủ công</span>
+                    <div style="flex: 1; height: 1px; background: var(--border);"></div>
+                </div>
+                
+                <form action="/api/tiktok-profiles" method="POST" class="form-group">
+                    <input type="text" name="url" placeholder="Paste TikTok channel URL here..." required>
+                    <input type="text" name="note" placeholder="Ghi chú (tùy chọn)...">
+                    <button type="submit">Add Channel</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <div class="section-header">
+                    <h2>TikTok Channel List</h2>
+                    <div class="stats">Total: {{ profiles|length }}</div>
+                </div>
+                <div class="data-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Channel URL</th>
+                                <th>Followers</th>
+                                <th>Note</th>
+                                <th>Added At</th>
+                                <th style="text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for profile in profiles %}
+                            <tr>
+                                <td>
+                                    <a href="{{ profile.url }}" target="_blank" class="item-url">{{ profile.url }}</a>
+                                </td>
+                                <td>
+                                    <span class="badge badge-tiktok">{{ "{:,}".format(profile.followers_count) }}</span>
+                                </td>
+                                <td>
+                                    <span class="text-muted" style="margin-left: 0;">{{ profile.note or '-' }}</span>
+                                </td>
+                                <td>
+                                    <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ profile.created_at.strftime('%Y-%m-%d') }}</span>
+                                </td>
+                                <td style="text-align: right;">
+                                    <form action="/api/tiktok-profiles/{{ profile.id }}/delete" method="POST" style="display:inline;" onsubmit="return confirm('Xác nhận xoá?')">
+                                        <button type="submit" class="btn-danger">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% if not profiles %}
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                    <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
+                                    Chưa có kênh nào được thêm.
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        async function importCSV() {
+            const fileInput = document.getElementById('csv-file');
+            if (!fileInput.files.length) {
+                alert('Vui lòng chọn file CSV');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            const btn = document.querySelector('.import-section button');
+            btn.disabled = true;
+            btn.textContent = 'Importing...';
+
+            try {
+                const response = await fetch('/api/tiktok-profiles/import', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.detail);
+                }
+            } catch (err) {
+                alert('Connection error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Import CSV';
+            }
+        }
+    </script>
+</body>
+</html>

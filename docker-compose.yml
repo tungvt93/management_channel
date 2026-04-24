@@ -1,4 +1,3 @@
-
 services:
   db:
     image: postgres:15
@@ -12,6 +11,27 @@ services:
       - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  web:
+    build: .
+    container_name: channel_manager_web
+    restart: always
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/postgres
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-use-long-random-string}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./cookie.json:/app/cookie.json:ro
 
 volumes:
   postgres_data:

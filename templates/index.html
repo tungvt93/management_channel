@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Channel Content Manager</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -21,6 +21,11 @@
             </div>
         </header>
 
+        <nav>
+            <a href="/" class="{% if active_menu == 'dashboard' %}active{% endif %}">Scraping Manager</a>
+            <a href="/tiktok-profiles" class="{% if active_menu == 'tiktok' %}active{% endif %}">TikTok Channels</a>
+        </nav>
+
         <section class="card">
             <h2>Add New Channel</h2>
             <form id="add-channel-form" class="form-group">
@@ -31,30 +36,31 @@
 
         <div class="grid">
             <section>
-                <h2>Channels</h2>
+                <div class="section-header">
+                    <h2>Channels</h2>
+                    <div class="stats">{{ channels|length }}</div>
+                </div>
                 <div class="channel-list">
                     {% for channel in channels %}
-                    <div class="item" id="channel-{{ channel.id }}">
+                    <div class="card" style="padding: 1.25rem; margin-bottom: 1rem;" id="channel-{{ channel.id }}">
                         {% set ss = channel.scraping_status if channel.scraping_status is string else channel.scraping_status.value %}
-                        <div class="item-info">
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                             <a href="{{ channel.url }}" target="_blank" class="item-url">{{ channel.url }}</a>
-                            <div class="item-meta">
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
                                 <span class="badge badge-{{ channel.platform.value }}">{{ channel.platform.value }}</span>
-                                <span class="badge badge-scraping-{{ ss }}" id="status-{{ channel.id }}">
+                                <span class="badge badge-scraping-{{ ss }}" id="status-{{ channel.id }}" style="font-size: 0.65rem;">
                                     {% if ss == 'in_progress' %}⏳ Đang quét...{% elif ss == 'success' %}✅ Hoàn thành{% elif ss == 'failed' %}❌ Thất bại{% else %}⬜ Chờ{% endif %}
                                 </span>
-                                {% if channel.last_scraped_at %}
-                                <span class="text-muted">Quét lúc: {{ channel.last_scraped_at.strftime('%Y-%m-%d %H:%M') }}</span>
-                                {% endif %}
-                                {% if channel.scraping_error %}
-                                <span class="text-error" title="{{ channel.scraping_error }}">⚠️ Lỗi</span>
-                                <span class="scraping-err-msg">{{ channel.scraping_error[:400] }}{% if channel.scraping_error|length > 400 %}…{% endif %}</span>
-                                {% endif %}
-                                Added {{ channel.created_at.strftime('%Y-%m-%d') }}
                             </div>
-                        </div>
-                        <div class="item-actions">
-                            <button type="button" class="btn-rescrape" onclick="rescrapeChannel({{ channel.id }}, this)">Quét lại</button>
+                            <div class="text-muted" style="font-size: 0.7rem; margin-left: 0; display: flex; justify-content: space-between; align-items: center;">
+                                <span>Added {{ channel.created_at.strftime('%Y-%m-%d') }}</span>
+                                <button type="button" class="btn-rescrape" onclick="rescrapeChannel({{ channel.id }}, this)" style="padding: 0.25rem 0.75rem; font-size: 0.7rem; background: transparent; border: 1px solid var(--primary); color: var(--primary);">Quét lại</button>
+                            </div>
+                            {% if channel.scraping_error %}
+                            <div class="text-error" style="font-size: 0.7rem; margin-left: 0;">
+                                ⚠️ {{ channel.scraping_error[:100] }}...
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
@@ -64,31 +70,46 @@
             <section>
                 <div class="section-header">
                     <h2>Video Links</h2>
-                    <select id="channel-filter" class="form-select" onchange="filterByChannel(this.value)">
-                        <option value="">All Channels</option>
-                        {% for channel in channels %}
-                        <option value="{{ channel.id }}" {% if selected_channel == channel.id %}selected{% endif %}>{{ channel.url }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="video-list">
-                    {% for video in videos %}
-                    <div class="item">
-                        <div class="item-info">
-                            <a href="{{ video.url }}" target="_blank" class="item-url">{{ video.url }}</a>
-                            <div class="item-meta">
-                                <span>Uploaded: {{ video.upload_date.strftime('%Y-%m-%d %H:%M') if video.upload_date else 'Unknown' }}</span>
-                            </div>
-                        </div>
-                        <div class="item-actions">
-                            <select class="status-select" onchange="updateStatus({{ video.id }}, this.value)">
-                                <option value="available" {% if video.status.value == 'available' %}selected{% endif %}>Available</option>
-                                <option value="holded" {% if video.status.value == 'holded' %}selected{% endif %}>Holded</option>
-                                <option value="done" {% if video.status.value == 'done' %}selected{% endif %}>Done</option>
-                            </select>
-                        </div>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <select id="channel-filter" class="form-select" onchange="filterByChannel(this.value)" style="background: rgba(30,41,59,0.5); color: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 0.5rem;">
+                            <option value="">All Channels</option>
+                            {% for channel in channels %}
+                            <option value="{{ channel.id }}" {% if selected_channel == channel.id %}selected{% endif %}>{{ channel.url }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="stats">{{ total_count }} items</div>
                     </div>
-                    {% endfor %}
+                </div>
+                
+                <div class="data-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Video URL</th>
+                                <th>Upload Date</th>
+                                <th style="text-align: right;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for video in videos %}
+                            <tr>
+                                <td>
+                                    <a href="{{ video.url }}" target="_blank" class="item-url" style="font-size: 0.85rem;">{{ video.url }}</a>
+                                </td>
+                                <td>
+                                    <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ video.upload_date.strftime('%Y-%m-%d %H:%M') if video.upload_date else '-' }}</span>
+                                </td>
+                                <td style="text-align: right;">
+                                    <select class="form-select" onchange="updateStatus({{ video.id }}, this.value)" style="background: rgba(15,23,42,0.4); color: white; border: 1px solid var(--border); padding: 0.35rem 0.5rem; border-radius: 0.4rem; font-size: 0.8rem;">
+                                        <option value="available" {% if video.status.value == 'available' %}selected{% endif %}>Available</option>
+                                        <option value="holded" {% if video.status.value == 'holded' %}selected{% endif %}>Holded</option>
+                                        <option value="done" {% if video.status.value == 'done' %}selected{% endif %}>Done</option>
+                                    </select>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
 
                 {% if total_pages > 1 %}

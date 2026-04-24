@@ -64,7 +64,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
-cookie.json
 *.pem
 
 # Logs and local debug artifacts
