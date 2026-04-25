@@ -375,6 +375,7 @@ async def dashboard(
     request: Request,
     channel_id: Optional[int] = None,
     channel_search: Optional[str] = None,
+    video_search: Optional[str] = None,
     page: int = 1,
     db: AsyncSession = Depends(get_db),
 ):
@@ -396,12 +397,14 @@ async def dashboard(
     video_stmt = select(VideoLink).order_by(VideoLink.upload_date.desc(), VideoLink.created_at.desc())
     count_stmt = select(func.count()).select_from(VideoLink)
 
+    video_search_term = (video_search or "").strip()
+    if video_search_term:
+        video_stmt = video_stmt.where(VideoLink.url.ilike(f"%{video_search_term}%"))
+        count_stmt = count_stmt.where(VideoLink.url.ilike(f"%{video_search_term}%"))
+
     if channel_id:
         video_stmt = video_stmt.where(VideoLink.channel_id == channel_id)
         count_stmt = count_stmt.where(VideoLink.channel_id == channel_id)
-    elif channel_search_term:
-        video_stmt = video_stmt.join(Channel).where(Channel.url.ilike(f"%{channel_search_term}%"))
-        count_stmt = count_stmt.join(Channel).where(Channel.url.ilike(f"%{channel_search_term}%"))
 
     # Execute pagination
     video_stmt = video_stmt.limit(page_size).offset(offset)
@@ -422,6 +425,7 @@ async def dashboard(
             "videos": videos,
             "selected_channel": channel_id,
             "channel_search": channel_search_term,
+            "video_search": video_search_term,
             "current_page": page,
             "total_pages": total_pages,
             "total_count": total_count,

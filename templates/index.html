@@ -52,14 +52,17 @@
                     <div class="stats">{{ channels|length }}</div>
                 </div>
                 <div style="margin-bottom: 0.75rem;">
-                    <input
-                        id="channel-search-input"
-                        type="text"
-                        value="{{ channel_search or '' }}"
-                        placeholder="Search theo link kênh..."
-                        onkeydown="onChannelSearchKeydown(event)"
-                        style="width: 100%; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.6rem 0.75rem; border-radius: 0.75rem;"
-                    />
+                    <div style="display:flex; gap: 0.5rem; align-items: center;">
+                        <input
+                            id="channel-search-input"
+                            type="text"
+                            value="{{ channel_search or '' }}"
+                            placeholder="Search theo link kênh..."
+                            onkeydown="onChannelSearchKeydown(event)"
+                            style="width: 100%; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.6rem 0.75rem; border-radius: 0.75rem;"
+                        />
+                        <button type="button" class="btn-secondary" onclick="runChannelSearch()" style="padding: 0.55rem 1rem;">Search</button>
+                    </div>
                 </div>
                 <div class="channel-list">
                     {% for channel in channels %}
@@ -99,13 +102,14 @@
                             {% endfor %}
                         </select>
                         <input
-                            id="channel-search-input-right"
+                            id="video-search-input-right"
                             type="text"
-                            value="{{ channel_search or '' }}"
-                            placeholder="Search link kênh..."
-                            onkeydown="onChannelSearchKeydown(event)"
+                            value="{{ video_search or '' }}"
+                            placeholder="Search link video..."
+                            onkeydown="onVideoSearchKeydown(event)"
                             style="min-width: 260px; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.5rem 0.65rem; border-radius: 0.5rem;"
                         />
+                        <button type="button" class="btn-secondary" onclick="runVideoSearch()" style="padding: 0.5rem 0.9rem;">Search</button>
                         <div class="stats">{{ total_count }} items</div>
                     </div>
                 </div>
@@ -239,7 +243,6 @@
             const url = new URL(window.location);
             if (channelId) {
                 url.searchParams.set('channel_id', channelId);
-                url.searchParams.delete('channel_search');
             } else {
                 url.searchParams.delete('channel_id');
             }
@@ -247,21 +250,32 @@
             window.location.href = url.toString();
         }
 
-        function onChannelSearchKeydown(e) {
-            if (e.key !== 'Enter') return;
-            const value =
-                (document.getElementById('channel-search-input')?.value || '').trim() ||
-                (document.getElementById('channel-search-input-right')?.value || '').trim();
+        function runChannelSearch() {
+            const value = (document.getElementById('channel-search-input')?.value || '').trim();
             const url = new URL(window.location);
-            if (value) {
-                url.searchParams.set('channel_search', value);
-            } else {
-                url.searchParams.delete('channel_search');
-            }
-            // Search theo link kênh: reset dropdown filter để tránh xung đột
-            url.searchParams.delete('channel_id');
+            if (value) url.searchParams.set('channel_search', value);
+            else url.searchParams.delete('channel_search');
             url.searchParams.set('page', 1);
             window.location.href = url.toString();
+        }
+
+        function onChannelSearchKeydown(e) {
+            if (e.key !== 'Enter') return;
+            runChannelSearch();
+        }
+
+        function runVideoSearch() {
+            const value = (document.getElementById('video-search-input-right')?.value || '').trim();
+            const url = new URL(window.location);
+            if (value) url.searchParams.set('video_search', value);
+            else url.searchParams.delete('video_search');
+            url.searchParams.set('page', 1);
+            window.location.href = url.toString();
+        }
+
+        function onVideoSearchKeydown(e) {
+            if (e.key !== 'Enter') return;
+            runVideoSearch();
         }
 
         function changePage(page) {
