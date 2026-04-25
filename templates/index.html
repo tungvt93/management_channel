@@ -78,7 +78,10 @@
                             </div>
                             <div class="text-muted" style="font-size: 0.7rem; margin-left: 0; display: flex; justify-content: space-between; align-items: center;">
                                 <span>Added {{ channel.created_at.strftime('%Y-%m-%d') }}</span>
-                                <button type="button" class="btn-rescrape" onclick="rescrapeChannel({{ channel.id }}, this)" style="padding: 0.25rem 0.75rem; font-size: 0.7rem; background: transparent; border: 1px solid var(--primary); color: var(--primary);">Quét lại</button>
+                                <div style="display:flex; gap: 0.5rem; align-items:center;">
+                                    <button type="button" class="btn-rescrape" onclick="rescrapeChannel({{ channel.id }}, this)" style="padding: 0.25rem 0.75rem; font-size: 0.7rem; background: transparent; border: 1px solid var(--primary); color: var(--primary);">Quét lại</button>
+                                    <button type="button" class="btn-danger" onclick="deleteChannel({{ channel.id }}, this)" style="padding: 0.25rem 0.75rem; font-size: 0.7rem;">Xoá</button>
+                                </div>
                             </div>
                             {% if channel.scraping_error %}
                             <div class="text-error" style="font-size: 0.7rem; margin-left: 0;">
@@ -340,6 +343,28 @@
                 alert('Lỗi kết nối');
             } finally {
                 btn.disabled = false;
+            }
+        }
+
+        async function deleteChannel(channelId, btn) {
+            if (!confirm('Xác nhận xoá Channel? Tất cả video links liên quan sẽ bị xoá.')) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = 'Đang xoá...';
+            try {
+                const resp = await fetch(`/api/channels/${channelId}/delete`, { method: 'POST' });
+                let data = {};
+                try { data = await resp.json(); } catch (e) {}
+                if (!resp.ok) {
+                    alert(data.detail || 'Không thể xoá channel.');
+                    return;
+                }
+                location.reload();
+            } catch (err) {
+                alert('Lỗi kết nối');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
             }
         }
 

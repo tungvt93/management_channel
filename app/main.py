@@ -333,6 +333,25 @@ async def rescrape_channel(
     return {"message": "Rescrape started", "channel_id": channel.id}
 
 
+@app.post(
+    "/api/channels/{channel_id}/delete",
+    dependencies=[Depends(require_login_api)],
+)
+async def delete_channel(
+    channel_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    # Xoá video_links trước để chắc chắn không vướng FK (bulk delete bỏ qua ORM cascade).
+    await db.execute(delete(VideoLink).where(VideoLink.channel_id == channel_id))
+    result = await db.execute(delete(Channel).where(Channel.id == channel_id))
+    deleted = int(result.rowcount or 0)
+    if deleted == 0:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Channel not found")
+    await db.commit()
+    return {"message": "Channel deleted", "channel_id": channel_id}
+
+
 @app.get("/login")
 async def login_page(request: Request):
     if request.session.get("user_id"):
