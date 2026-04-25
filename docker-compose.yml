@@ -28,12 +28,15 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/postgres
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-use-long-random-string}
-      RELOAD: "1"
+      # Prod mode (không bind-mount code). Nếu muốn dev hot-reload:
+      # - đặt RELOAD="1"
+      # - bật lại volume mount ./:/app bên dưới
+      RELOAD: "0"
+      TZ: Asia/Ho_Chi_Minh
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ./:/app
       - ./cookie.json:/app/cookie.json:ro
 
 volumes:

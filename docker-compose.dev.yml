@@ -1,0 +1,9 @@
+services:
+  web:
+    environment:
+      # Dev mode: bật hot reload
+      RELOAD: "1"
+    volumes:
+      # Mount code để sửa là thấy ngay trong container
+      - ./:/app
+

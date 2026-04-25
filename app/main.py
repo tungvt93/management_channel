@@ -21,7 +21,7 @@ import io
 from .auth import verify_password
 from .database import AsyncSessionLocal, get_db, init_db
 from .models import Channel, Platform, ScrapingStatus, User, VideoLink, VideoStatus, TikTokProfile
-from .scraper import get_tiktok_videos, get_youtube_videos
+from .scraper import get_tiktok_followers_count, get_tiktok_videos, get_youtube_videos
 
 logger = logging.getLogger(__name__)
 
@@ -470,6 +470,7 @@ async def import_tiktok_profiles(
     # We'll skip header if it looks like one.
     
     imported_count = 0
+    updated_followers_count = 0
     for row in reader:
         if not row or len(row) < 1:
             continue
@@ -485,13 +486,27 @@ async def import_tiktok_profiles(
         result = await db.execute(stmt)
         if result.scalar_one_or_none():
             continue
-            
-        profile = TikTokProfile(url=url, note=note)
+
+        followers_count = 0
+        try:
+            followers_count = int(await get_tiktok_followers_count(url))
+        except Exception as exc:
+            logger.warning("Không lấy được followers cho %s: %s", url, exc)
+            followers_count = 0
+
+        profile = TikTokProfile(url=url, note=note, followers_count=followers_count)
         db.add(profile)
         imported_count += 1
+        if followers_count > 0:
+            updated_followers_count += 1
         
     await db.commit()
-    return {"message": f"Successfully imported {imported_count} profiles"}
+    return {
+        "message": (
+            f"Successfully imported {imported_count} profiles "
+            f"(follower checked: {updated_followers_count}/{imported_count})."
+        )
+    }
 
 @app.post("/api/tiktok-profiles")
 async def add_tiktok_profile(
@@ -505,7 +520,14 @@ async def add_tiktok_profile(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Profile already exists")
     
-    profile = TikTokProfile(url=url, note=note)
+    followers_count = 0
+    try:
+        followers_count = int(await get_tiktok_followers_count(url))
+    except Exception as exc:
+        logger.warning("Không lấy được followers cho %s: %s", url, exc)
+        followers_count = 0
+
+    profile = TikTokProfile(url=url, note=note, followers_count=followers_count)
     db.add(profile)
     await db.commit()
     return RedirectResponse("/tiktok-profiles", status_code=303)

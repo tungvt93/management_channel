@@ -46,6 +46,48 @@ def _chrome_extension_json_to_netscape(cookie_json_text: str) -> str:
     return "\n".join(lines)
 
 
+def _load_tiktok_cookies_for_playwright() -> list[dict[str, Any]]:
+    """
+    Đọc cookie.json (export từ extension) và convert sang format Playwright.
+    Chỉ lấy cookie thuộc domain tiktok.com để giảm rủi ro lỗi.
+    """
+    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+    if not cookie_json.is_file():
+        return []
+    try:
+        raw = cookie_json.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except Exception as exc:
+        logger.warning("TikTok cookies: không đọc/parse được cookie.json (%s)", exc)
+        return []
+
+    cookies: list[dict[str, Any]] = []
+    for c in data if isinstance(data, list) else []:
+        if not isinstance(c, dict):
+            continue
+        name = c.get("name")
+        value = c.get("value", "")
+        domain = c.get("domain") or ""
+        if not name or "tiktok.com" not in domain:
+            continue
+        ck: dict[str, Any] = {
+            "name": name,
+            "value": value,
+            "domain": domain,
+            "path": c.get("path") or "/",
+            "secure": bool(c.get("secure")),
+            "httpOnly": bool(c.get("httpOnly")),
+        }
+        exp = c.get("expirationDate")
+        if exp and not c.get("session"):
+            try:
+                ck["expires"] = float(exp)
+            except Exception:
+                pass
+        cookies.append(ck)
+    return cookies
+
+
 async def get_youtube_videos(channel_url: str):
     videos = []
     async with async_playwright() as p:
@@ -229,3 +271,65 @@ async def get_tiktok_videos(channel_url: str):
                 tmp_cookie.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def _parse_tiktok_follower_count_from_html(html: str) -> Optional[int]:
+    """
+    Parse followerCount từ HTML TikTok profile page.
+    TikTok thường embed JSON có key "followerCount".
+    """
+    if not html:
+        return None
+    # Lấy tất cả followerCount xuất hiện và chọn số lớn nhất để tránh trúng field phụ.
+    # Ví dụ: "followerCount":123456
+    import re
+
+    matches = re.findall(r'"followerCount"\s*:\s*(\d+)', html)
+    if not matches:
+        return None
+    try:
+        nums = [int(x) for x in matches]
+    except ValueError:
+        return None
+    return max(nums) if nums else None
+
+
+async def get_tiktok_followers_count(profile_url: str) -> int:
+    """
+    Lấy số follower của 1 kênh TikTok từ URL profile.
+    - Dùng Playwright vì TikTok nhiều khi cần JS để render.
+    - Trả về 0 nếu không parse được.
+    """
+    profile_url = (profile_url or "").strip()
+    if not profile_url:
+        return 0
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            viewport={"width": 1365, "height": 768},
+        )
+        # Add cookies nếu có (giúp tránh bị TikTok chặn / trả trang rỗng).
+        try:
+            cookies = _load_tiktok_cookies_for_playwright()
+            if cookies:
+                await context.add_cookies(cookies)
+        except Exception as exc:
+            logger.warning("TikTok cookies: add_cookies failed (%s)", exc)
+        page = await context.new_page()
+        try:
+            await page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
+            # Đợi thêm một chút để JS hydrate (TikTok thường render muộn).
+            await page.wait_for_timeout(2500)
+            html = await page.content()
+            parsed = _parse_tiktok_follower_count_from_html(html)
+            if parsed is not None:
+                return int(parsed)
+            # Fallback: thử đọc innerText để bắt trường hợp TikTok render theo text.
+            body_text = await page.inner_text("body")
+            parsed2 = _parse_tiktok_follower_count_from_html(body_text)
+            return int(parsed2 or 0)
+        finally:
+            await context.close()
+            await browser.close()
