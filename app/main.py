@@ -411,6 +411,18 @@ async def dashboard(
 
     channels_result = await db.execute(channels_stmt)
     channels = channels_result.scalars().all()
+
+    # Map channel_id -> total videos
+    channel_video_counts: dict[int, int] = {}
+    channel_ids = [c.id for c in channels]
+    if channel_ids:
+        counts_stmt = (
+            select(VideoLink.channel_id, func.count(VideoLink.id))
+            .where(VideoLink.channel_id.in_(channel_ids))
+            .group_by(VideoLink.channel_id)
+        )
+        counts_result = await db.execute(counts_stmt)
+        channel_video_counts = {cid: int(cnt) for cid, cnt in counts_result.all()}
     
     # Build video query with optional filter
     video_stmt = select(VideoLink).order_by(VideoLink.upload_date.desc(), VideoLink.created_at.desc())
@@ -441,6 +453,7 @@ async def dashboard(
         name="index.html",
         context={
             "channels": channels,
+            "channel_video_counts": channel_video_counts,
             "videos": videos,
             "selected_channel": channel_id,
             "channel_search": channel_search_term,

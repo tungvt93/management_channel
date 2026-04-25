@@ -72,6 +72,9 @@
                             <a href="{{ channel.url }}" target="_blank" class="item-url">{{ channel.url }}</a>
                             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
                                 <span class="badge badge-{{ channel.platform.value }}">{{ channel.platform.value }}</span>
+                                <span class="badge" style="background: rgba(255, 255, 255, 0.05); color: var(--text-muted); border: 1px solid var(--border); font-size: 0.65rem;">
+                                    {{ channel_video_counts.get(channel.id, 0) }} videos
+                                </span>
                                 <span class="badge badge-scraping-{{ ss }}" id="status-{{ channel.id }}" style="font-size: 0.65rem;">
                                     {% if ss == 'in_progress' %}⏳ Đang quét...{% elif ss == 'success' %}✅ Hoàn thành{% elif ss == 'failed' %}❌ Thất bại{% else %}⬜ Chờ{% endif %}
                                 </span>
