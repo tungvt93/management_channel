@@ -287,6 +287,34 @@ button:active {
     gap: 2.5rem;
 }
 
+.channel-list-scroll {
+    max-height: calc(100vh - 360px);
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+.channel-list-scroll::-webkit-scrollbar {
+    width: 10px;
+}
+
+.channel-list-scroll::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 999px;
+}
+
+.channel-list-scroll::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 999px;
+    border: 2px solid rgba(0, 0, 0, 0);
+    background-clip: padding-box;
+}
+
+.channel-list-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.38);
+    border: 2px solid rgba(0, 0, 0, 0);
+    background-clip: padding-box;
+}
+
 .header-actions {
     display: flex;
     align-items: center;
@@ -315,5 +343,11 @@ button:active {
 @media (max-width: 992px) {
     .grid {
         grid-template-columns: 1fr;
+    }
+
+    .channel-list-scroll {
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
     }
 }

@@ -64,7 +64,7 @@
                         <button type="button" class="btn-secondary" onclick="runChannelSearch()" style="padding: 0.55rem 1rem;">Search</button>
                     </div>
                 </div>
-                <div class="channel-list">
+                <div class="channel-list channel-list-scroll">
                     {% for channel in channels %}
                     <div class="card" style="padding: 1.25rem; margin-bottom: 1rem;" id="channel-{{ channel.id }}">
                         {% set ss = channel.scraping_status if channel.scraping_status is string else channel.scraping_status.value %}
