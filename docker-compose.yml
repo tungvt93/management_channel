@@ -24,13 +24,16 @@ services:
     restart: always
     ports:
       - "8001:8000"
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/postgres
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-use-long-random-string}
+      RELOAD: "1"
     depends_on:
       db:
         condition: service_healthy
     volumes:
+      - ./:/app
       - ./cookie.json:/app/cookie.json:ro
 
 volumes:

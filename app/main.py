@@ -186,6 +186,67 @@ async def update_video_status(video_id: int, status_update: VideoUpdate, db: Asy
     await db.commit()
     return updated_video
 
+
+@app.post(
+    "/api/videos/import-done",
+    dependencies=[Depends(require_login_api)],
+)
+async def import_videos_mark_done(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Import CSV gồm 1 cột duy nhất là link video.
+    Với mỗi link trùng trong DB thì update status -> DONE.
+    """
+    raw = await file.read()
+    try:
+        decoded = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        decoded = raw.decode("utf-8", errors="replace")
+
+    reader = csv.reader(io.StringIO(decoded))
+
+    urls: set[str] = set()
+    for row in reader:
+        if not row:
+            continue
+        url = (row[0] or "").strip()
+        if not url:
+            continue
+        low = url.lower()
+        if low in {"url", "link", "video_url", "video link"}:
+            continue
+        urls.add(url)
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="CSV không có link hợp lệ.")
+
+    existing_res = await db.execute(select(VideoLink.url).where(VideoLink.url.in_(urls)))
+    existing_urls = set(existing_res.scalars().all())
+    not_found = sorted(urls - existing_urls)
+
+    if existing_urls:
+        upd_stmt = (
+            update(VideoLink)
+            .where(VideoLink.url.in_(existing_urls))
+            .values(status=VideoStatus.DONE)
+        )
+        result = await db.execute(upd_stmt)
+        updated_count = int(result.rowcount or 0)
+        await db.commit()
+    else:
+        updated_count = 0
+
+    return {
+        "total_in_csv": len(urls),
+        "matched_in_db": len(existing_urls),
+        "updated_to_done": updated_count,
+        "not_found_count": len(not_found),
+        "not_found_sample": not_found[:20],
+        "message": f"Đã cập nhật DONE: {updated_count}/{len(urls)} link (không tìm thấy: {len(not_found)}).",
+    }
+
 # 3. API: Add channel and trigger scrape
 @app.post("/api/channels")
 async def add_channel(channel_in: ChannelCreate, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
@@ -314,6 +375,7 @@ async def logout(request: Request):
 async def dashboard(
     request: Request,
     channel_id: Optional[int] = None,
+    channel_search: Optional[str] = None,
     page: int = 1,
     db: AsyncSession = Depends(get_db),
 ):
@@ -322,8 +384,13 @@ async def dashboard(
     page_size = 20
     offset = (page - 1) * page_size
 
-    # Fetch all channels for the filter dropdown
-    channels_result = await db.execute(select(Channel).order_by(Channel.created_at.desc()))
+    # Fetch channels (optionally filter by URL substring)
+    channels_stmt = select(Channel).order_by(Channel.created_at.desc())
+    channel_search_term = (channel_search or "").strip()
+    if channel_search_term:
+        channels_stmt = channels_stmt.where(Channel.url.ilike(f"%{channel_search_term}%"))
+
+    channels_result = await db.execute(channels_stmt)
     channels = channels_result.scalars().all()
     
     # Build video query with optional filter
@@ -333,6 +400,9 @@ async def dashboard(
     if channel_id:
         video_stmt = video_stmt.where(VideoLink.channel_id == channel_id)
         count_stmt = count_stmt.where(VideoLink.channel_id == channel_id)
+    elif channel_search_term:
+        video_stmt = video_stmt.join(Channel).where(Channel.url.ilike(f"%{channel_search_term}%"))
+        count_stmt = count_stmt.join(Channel).where(Channel.url.ilike(f"%{channel_search_term}%"))
 
     # Execute pagination
     video_stmt = video_stmt.limit(page_size).offset(offset)
@@ -352,6 +422,7 @@ async def dashboard(
             "channels": channels,
             "videos": videos,
             "selected_channel": channel_id,
+            "channel_search": channel_search_term,
             "current_page": page,
             "total_pages": total_pages,
             "total_count": total_count,

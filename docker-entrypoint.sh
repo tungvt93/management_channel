@@ -15,4 +15,9 @@ done
 echo "Running migrations..."
 alembic upgrade head
 
+if [ "${RELOAD:-0}" = "1" ]; then
+  echo "Starting server with auto-reload..."
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app
+fi
+
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000

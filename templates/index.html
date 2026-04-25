@@ -34,11 +34,32 @@
             </form>
         </section>
 
+        <section class="card">
+            <h2>Import CSV (Mark video Done)</h2>
+            <form id="import-done-form" class="form-group">
+                <input type="file" id="done-csv-file" accept=".csv" required>
+                <button type="submit">Upload & Mark Done</button>
+            </form>
+            <div class="text-muted" style="font-size: 0.75rem; margin-top: 0.5rem;">
+                CSV chỉ cần 1 cột duy nhất: link video (mỗi dòng 1 link).
+            </div>
+        </section>
+
         <div class="grid">
             <section>
                 <div class="section-header">
                     <h2>Channels</h2>
                     <div class="stats">{{ channels|length }}</div>
+                </div>
+                <div style="margin-bottom: 0.75rem;">
+                    <input
+                        id="channel-search-input"
+                        type="text"
+                        value="{{ channel_search or '' }}"
+                        placeholder="Search theo link kênh..."
+                        onkeydown="onChannelSearchKeydown(event)"
+                        style="width: 100%; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.6rem 0.75rem; border-radius: 0.75rem;"
+                    />
                 </div>
                 <div class="channel-list">
                     {% for channel in channels %}
@@ -77,6 +98,14 @@
                             <option value="{{ channel.id }}" {% if selected_channel == channel.id %}selected{% endif %}>{{ channel.url }}</option>
                             {% endfor %}
                         </select>
+                        <input
+                            id="channel-search-input-right"
+                            type="text"
+                            value="{{ channel_search or '' }}"
+                            placeholder="Search link kênh..."
+                            onkeydown="onChannelSearchKeydown(event)"
+                            style="min-width: 260px; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.5rem 0.65rem; border-radius: 0.5rem;"
+                        />
                         <div class="stats">{{ total_count }} items</div>
                     </div>
                 </div>
@@ -154,6 +183,42 @@
             }
         });
 
+        document.getElementById('import-done-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('done-csv-file');
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) {
+                alert('Vui lòng chọn file CSV');
+                return;
+            }
+
+            const btn = e.target.querySelector('button');
+            btn.disabled = true;
+            btn.textContent = 'Uploading...';
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const resp = await fetch('/api/videos/import-done', {
+                    method: 'POST',
+                    body: form
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    alert('Error: ' + (data.detail || 'Upload failed'));
+                    return;
+                }
+                alert(data.message || 'Done');
+                fileInput.value = '';
+                location.reload();
+            } catch (err) {
+                alert('Connection error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Upload & Mark Done';
+            }
+        });
+
         async function updateStatus(videoId, newStatus) {
             try {
                 const response = await fetch(`/api/videos/${videoId}`, {
@@ -174,10 +239,28 @@
             const url = new URL(window.location);
             if (channelId) {
                 url.searchParams.set('channel_id', channelId);
+                url.searchParams.delete('channel_search');
             } else {
                 url.searchParams.delete('channel_id');
             }
             url.searchParams.set('page', 1); // Reset to page 1
+            window.location.href = url.toString();
+        }
+
+        function onChannelSearchKeydown(e) {
+            if (e.key !== 'Enter') return;
+            const value =
+                (document.getElementById('channel-search-input')?.value || '').trim() ||
+                (document.getElementById('channel-search-input-right')?.value || '').trim();
+            const url = new URL(window.location);
+            if (value) {
+                url.searchParams.set('channel_search', value);
+            } else {
+                url.searchParams.delete('channel_search');
+            }
+            // Search theo link kênh: reset dropdown filter để tránh xung đột
+            url.searchParams.delete('channel_id');
+            url.searchParams.set('page', 1);
             window.location.href = url.toString();
         }
 
