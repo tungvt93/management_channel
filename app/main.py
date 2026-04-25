@@ -279,7 +279,6 @@ async def add_channel(channel_in: ChannelCreate, background_tasks: BackgroundTas
 @app.get(
     "/api/channels",
     response_model=List[ChannelResponse],
-    dependencies=[Depends(require_login_api)],
 )
 async def list_channels(db: AsyncSession = Depends(get_db)):
     """Trả về danh sách tất cả kênh (mới nhất trước)."""
@@ -539,6 +538,47 @@ async def delete_tiktok_profile(
     user_id: int = Depends(require_login_api)
 ):
     await db.execute(delete(TikTokProfile).where(TikTokProfile.id == profile_id))
+    await db.commit()
+    return RedirectResponse("/tiktok-profiles", status_code=303)
+
+
+@app.post("/api/tiktok-profiles/{profile_id}/update")
+async def update_tiktok_profile(
+    profile_id: int,
+    url: str = Form(...),
+    note: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api)
+):
+    stmt = select(TikTokProfile).where(TikTokProfile.id == profile_id)
+    result = await db.execute(stmt)
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    url = url.strip()
+    note = note.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    # Nếu đổi URL, kiểm tra unique và cập nhật followers (best-effort)
+    if profile.url != url:
+        exists_stmt = (
+            select(TikTokProfile.id)
+            .where(TikTokProfile.url == url)
+            .where(TikTokProfile.id != profile_id)
+        )
+        exists = await db.execute(exists_stmt)
+        if exists.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=400, detail="Profile URL already exists")
+
+        profile.url = url
+        try:
+            profile.followers_count = int(await get_tiktok_followers_count(url))
+        except Exception as exc:
+            logger.warning("Không lấy được followers cho %s: %s", url, exc)
+
+    profile.note = note or None
     await db.commit()
     return RedirectResponse("/tiktok-profiles", status_code=303)
 

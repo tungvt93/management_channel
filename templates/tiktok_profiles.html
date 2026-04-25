@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TikTok Channel Management - Channel Manager</title>
-    <link rel="stylesheet" href="/static/style.css?v=2.0">
+    <link rel="stylesheet" href="/static/style.css?v=2.1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -80,6 +80,15 @@
                                     <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ profile.created_at.strftime('%Y-%m-%d') }}</span>
                                 </td>
                                 <td style="text-align: right;">
+                                    <button
+                                        type="button"
+                                        class="btn-secondary"
+                                        data-id="{{ profile.id }}"
+                                        data-url="{{ profile.url }}"
+                                        data-note-json='{{ (profile.note or "")|tojson }}'
+                                        onclick="openEditModal(this)"
+                                        style="margin-right: 0.5rem;"
+                                    >Edit</button>
                                     <form action="/api/tiktok-profiles/{{ profile.id }}/delete" method="POST" style="display:inline;" onsubmit="return confirm('Xác nhận xoá?')">
                                         <button type="submit" class="btn-danger">Delete</button>
                                     </form>
@@ -135,6 +144,59 @@
                 btn.textContent = 'Import CSV';
             }
         }
+    </script>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal-overlay" style="display:none;" onclick="closeEditModal(event)">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="edit-modal-title" style="margin:0;">Edit TikTok Channel</h3>
+                <button type="button" class="btn-secondary" onclick="closeEditModal()">Close</button>
+            </div>
+            <form id="edit-form" method="POST" class="form-group" style="margin-top: 1rem;">
+                <input type="text" id="edit-url" name="url" placeholder="TikTok channel URL..." required>
+                <input type="text" id="edit-note" name="note" placeholder="Ghi chú (tùy chọn)...">
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+                    <button type="button" class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+                    <button type="submit">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openEditModal(btn) {
+            const id = btn.dataset.id;
+            const url = btn.dataset.url || '';
+            let note = '';
+            try {
+                note = btn.dataset.noteJson ? JSON.parse(btn.dataset.noteJson) : '';
+            } catch (e) {
+                note = '';
+            }
+
+            const modal = document.getElementById('edit-modal');
+            const form = document.getElementById('edit-form');
+            const urlInput = document.getElementById('edit-url');
+            const noteInput = document.getElementById('edit-note');
+
+            form.action = `/api/tiktok-profiles/${id}/update`;
+            urlInput.value = url;
+            noteInput.value = note;
+
+            modal.style.display = 'flex';
+            setTimeout(() => urlInput.focus(), 0);
+        }
+
+        function closeEditModal(e) {
+            if (e && e.target && e.target.id !== 'edit-modal') return;
+            const modal = document.getElementById('edit-modal');
+            modal.style.display = 'none';
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeEditModal();
+        });
     </script>
 </body>
 </html>

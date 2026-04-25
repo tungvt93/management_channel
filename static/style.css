@@ -221,6 +221,50 @@ button:active {
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
+.btn-secondary {
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+}
+
+.btn-secondary:hover {
+    background: rgba(148, 163, 184, 0.22);
+    color: white;
+    box-shadow: 0 4px 12px rgba(148, 163, 184, 0.18);
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 8vh 1.5rem 1.5rem;
+    overflow-y: auto;
+    z-index: 1000;
+}
+
+.modal {
+    width: min(720px, 100%);
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 1rem;
+    padding: 1.25rem 1.25rem 1.5rem;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+    max-height: calc(100vh - 12vh - 3rem);
+    overflow: auto;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
 .import-section {
     display: flex;
     align-items: center;
