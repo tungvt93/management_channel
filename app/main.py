@@ -22,6 +22,7 @@ from .auth import verify_password
 from .database import AsyncSessionLocal, get_db, init_db
 from .models import (
     Channel,
+    ChannelManager,
     Platform,
     ScrapingStatus,
     User,
@@ -72,6 +73,7 @@ class ChannelResponse(BaseModel):
     url: str
     platform: Platform
     name: Optional[str]
+    manager: Optional[ChannelManager]
     scraping_status: ScrapingStatus
     last_scraped_at: Optional[datetime]
     scraping_error: Optional[str]
@@ -320,6 +322,33 @@ async def list_channels(db: AsyncSession = Depends(get_db)):
     """Trả về danh sách tất cả kênh (mới nhất trước)."""
     result = await db.execute(select(Channel).order_by(Channel.created_at.desc()))
     return result.scalars().all()
+
+
+@app.post(
+    "/api/channels/{channel_id}/manager",
+    dependencies=[Depends(require_login_api)],
+)
+async def update_channel_manager(
+    channel_id: int,
+    manager: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    m = (manager or "").strip().lower()
+    if m == "":
+        new_value = None
+    elif m in {ChannelManager.TUNG.value, ChannelManager.LONG.value}:
+        new_value = ChannelManager(m)
+    else:
+        raise HTTPException(status_code=400, detail="manager không hợp lệ")
+
+    result = await db.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    channel.manager = new_value
+    await db.commit()
+    return {"ok": True, "channel_id": channel_id, "manager": new_value.value if new_value else None}
 
 
 # 4. API: Get channel scraping status

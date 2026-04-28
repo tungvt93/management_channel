@@ -20,6 +20,10 @@ class ScrapingStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
 
+class ChannelManager(str, enum.Enum):
+    TUNG = "tung"
+    LONG = "long"
+
 
 # Trạng thái upload (tab TikTok Channels) — giá trị lưu DB
 TIKTOK_PROFILE_UPLOAD_PENDING = "pending"
@@ -41,6 +45,14 @@ class Channel(Base):
     url = Column(String, unique=True, index=True, nullable=False)
     platform = Column(SQLEnum(Platform, name="platform", values_callable=lambda x: [e.value for e in x]), nullable=False)
     name = Column(String, nullable=True) # Optional channel name
+    manager = Column(
+        SQLEnum(
+            ChannelManager,
+            name="channelmanager",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=True,
+    )
     scraping_status = Column(SQLEnum(ScrapingStatus, name="scrapingstatus", values_callable=lambda x: [e.value for e in x]), default=ScrapingStatus.IDLE, nullable=False, server_default=ScrapingStatus.IDLE.value)
     last_scraped_at = Column(DateTime(timezone=True), nullable=True)
     scraping_error = Column(Text, nullable=True)
