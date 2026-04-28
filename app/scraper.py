@@ -46,17 +46,18 @@ def _chrome_extension_json_to_netscape(cookie_json_text: str) -> str:
     return "\n".join(lines)
 
 
-def _load_tiktok_cookies_for_playwright() -> list[dict[str, Any]]:
+def _load_tiktok_cookies_for_playwright(cookie_json_text: Optional[str] = None) -> list[dict[str, Any]]:
     """
     Đọc cookie.json (export từ extension) và convert sang format Playwright.
     Chỉ lấy cookie thuộc domain tiktok.com để giảm rủi ro lỗi.
     """
-    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
-    if not cookie_json.is_file():
-        return []
     try:
-        raw = cookie_json.read_text(encoding="utf-8")
-        data = json.loads(raw)
+        if cookie_json_text is None:
+            cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+            if not cookie_json.is_file():
+                return []
+            cookie_json_text = cookie_json.read_text(encoding="utf-8")
+        data = json.loads(cookie_json_text)
     except Exception as exc:
         logger.warning("TikTok cookies: không đọc/parse được cookie.json (%s)", exc)
         return []
@@ -86,6 +87,18 @@ def _load_tiktok_cookies_for_playwright() -> list[dict[str, Any]]:
                 pass
         cookies.append(ck)
     return cookies
+
+
+def _read_cookie_json_text(cookie_json_text: Optional[str]) -> Optional[str]:
+    if cookie_json_text is not None:
+        return cookie_json_text
+    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+    if not cookie_json.is_file():
+        return None
+    try:
+        return cookie_json.read_text(encoding="utf-8")
+    except Exception:
+        return None
 
 
 async def get_youtube_videos(channel_url: str):
@@ -158,26 +171,24 @@ def _tiktok_entry_video_url(ent: dict[str, Any], channel_url: str) -> Optional[s
     return None
 
 
-async def get_tiktok_videos(channel_url: str):
+async def get_tiktok_videos(channel_url: str, cookie_json_text: Optional[str] = None):
     """
     TikTok Web returns empty JSON for item_list without browser X-Bogus/X-Gnarly signatures.
     yt-dlp with Netscape cookies (from the same cookie.json as Playwright) reliably lists videos.
     """
     channel_url = channel_url.strip()
-    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+    cookie_text = _read_cookie_json_text(cookie_json_text)
     tmp_cookie: Optional[Path] = None
 
     def _build_tmp_cookie_from_json() -> Optional[Path]:
-        if not cookie_json.is_file():
+        if not cookie_text:
             logger.info(
-                "TikTok: không có cookie tại %s — thử yt-dlp không cookie "
-                "(export cookie.json hoặc đặt TIKTOK_COOKIES_FILE)",
-                cookie_json,
+                "TikTok: không có cookie — thử yt-dlp không cookie "
+                "(cập nhật cookie ở Settings hoặc mount cookie.json/TIKTOK_COOKIES_FILE)",
             )
             return None
         try:
-            text = cookie_json.read_text(encoding="utf-8")
-            netscape = _chrome_extension_json_to_netscape(text)
+            netscape = _chrome_extension_json_to_netscape(cookie_text)
         except (json.JSONDecodeError, OSError, UnicodeDecodeError, TypeError, KeyError, ValueError) as exc:
             logger.warning(
                 "TikTok: file cookie không đọc/parse được (%s), bỏ qua cookie và thử không cookie",
@@ -187,12 +198,7 @@ async def get_tiktok_videos(channel_url: str):
         fd, tmp_name = tempfile.mkstemp(prefix="tiktok_ytdlp_", suffix=".txt", text=True)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(netscape)
-        src = str(cookie_json.resolve())
-        logger.info(
-            "TikTok: yt-dlp dùng cookie đã chuyển từ %s (%s dòng)",
-            src,
-            netscape.count("\n") + 1,
-        )
+        logger.info("TikTok: yt-dlp dùng cookie (%s dòng)", netscape.count("\n") + 1)
         return Path(tmp_name)
 
     try:
@@ -290,7 +296,9 @@ def _tiktok_entry_views(ent: dict[str, Any]) -> int:
     return 0
 
 
-async def get_tiktok_latest_videos_with_views(profile_url: str, limit: int = 5) -> list[dict[str, Any]]:
+async def get_tiktok_latest_videos_with_views(
+    profile_url: str, limit: int = 5, cookie_json_text: Optional[str] = None
+) -> list[dict[str, Any]]:
     """
     Lấy danh sách video mới nhất (mặc định 5) kèm view count.
     Dùng yt-dlp (không extract_flat) để lấy metadata của từng entry.
@@ -299,15 +307,14 @@ async def get_tiktok_latest_videos_with_views(profile_url: str, limit: int = 5) 
     if not profile_url or limit <= 0:
         return []
 
-    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+    cookie_text = _read_cookie_json_text(cookie_json_text)
     tmp_cookie: Optional[Path] = None
 
     def _build_tmp_cookie_from_json() -> Optional[Path]:
-        if not cookie_json.is_file():
+        if not cookie_text:
             return None
         try:
-            text = cookie_json.read_text(encoding="utf-8")
-            netscape = _chrome_extension_json_to_netscape(text)
+            netscape = _chrome_extension_json_to_netscape(cookie_text)
         except (json.JSONDecodeError, OSError, UnicodeDecodeError, TypeError, KeyError, ValueError):
             return None
         fd, tmp_name = tempfile.mkstemp(prefix="tiktok_ytdlp_", suffix=".txt", text=True)
@@ -482,7 +489,7 @@ async def _tiktok_followers_from_dom(page: Any) -> Optional[int]:
     return None
 
 
-async def get_tiktok_followers_count(profile_url: str) -> int:
+async def get_tiktok_followers_count(profile_url: str, cookie_json_text: Optional[str] = None) -> int:
     """
     Lấy số follower của 1 kênh TikTok từ URL profile.
     - Dùng Playwright vì TikTok nhiều khi cần JS để render.
@@ -500,7 +507,7 @@ async def get_tiktok_followers_count(profile_url: str) -> int:
         )
         # Add cookies nếu có (giúp tránh bị TikTok chặn / trả trang rỗng).
         try:
-            cookies = _load_tiktok_cookies_for_playwright()
+            cookies = _load_tiktok_cookies_for_playwright(cookie_json_text=cookie_json_text)
             if cookies:
                 await context.add_cookies(cookies)
         except Exception as exc:

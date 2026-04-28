@@ -105,3 +105,24 @@ class TikTokProfile(Base):
         server_default=text("'pending'"),
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TikTokCookieSetting(Base):
+    __tablename__ = "tiktok_cookie_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cookie_json = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TikTokSyncRun(Base):
+    __tablename__ = "tiktok_sync_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kind = Column(String(32), nullable=False)  # manual | cron
+    status = Column(String(32), nullable=False, server_default=text("'running'"))  # running | success | failed
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    message = Column(Text, nullable=True)

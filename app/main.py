@@ -1,6 +1,7 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import List, Optional
 
@@ -29,6 +30,8 @@ from .models import (
     VideoLink,
     VideoStatus,
     TikTokProfile,
+    TikTokCookieSetting,
+    TikTokSyncRun,
     TIKTOK_PROFILE_UPLOAD_STATUSES,
 )
 from .scraper import (
@@ -61,6 +64,13 @@ app.mount(
     name="static",
 )
 templates = Jinja2Templates(directory=str(_PROJECT_ROOT / "templates"))
+# Dev: tránh Jinja cache template khiến sửa HTML không hiện ngay
+try:
+    if os.getenv("RELOAD", "0") == "1":
+        templates.env.auto_reload = True
+        templates.env.cache = {}
+except Exception:
+    pass
 
 
 async def require_login_api(request: Request) -> None:
@@ -169,8 +179,9 @@ async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: st
     url = (profile_url or "").strip()
     if not url:
         return
+    cookie_json = await _get_tiktok_cookie_json()
     try:
-        n = int(await get_tiktok_followers_count(url))
+        n = int(await get_tiktok_followers_count(url, cookie_json_text=cookie_json))
     except Exception as exc:
         logger.warning(
             "Background: không lấy được followers profile_id=%s url=%s: %s",
@@ -190,26 +201,62 @@ async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: st
         await db.commit()
 
 
+async def _get_tiktok_cookie_json() -> Optional[str]:
+    """Lấy cookie TikTok từ DB (ưu tiên) để dùng cho scraper/cron."""
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(select(TikTokCookieSetting).order_by(TikTokCookieSetting.updated_at.desc()))
+        setting = res.scalars().first()
+        return setting.cookie_json if setting else None
+
+
+def _compute_cookie_expires_at(cookie_json_text: str) -> Optional[datetime]:
+    """
+    Lấy expires_at ước tính từ cookie.json export (max expirationDate).
+    """
+    import json as _json
+
+    try:
+        data = _json.loads(cookie_json_text or "")
+    except Exception:
+        return None
+    if not isinstance(data, list):
+        return None
+    max_ts: Optional[float] = None
+    for c in data:
+        if not isinstance(c, dict):
+            continue
+        exp = c.get("expirationDate")
+        if isinstance(exp, (int, float)) and exp > 0:
+            max_ts = exp if max_ts is None else max(max_ts, float(exp))
+    if not max_ts:
+        return None
+    # một số export là seconds epoch
+    try:
+        return datetime.fromtimestamp(int(max_ts), tz=timezone.utc)
+    except Exception:
+        return None
+
 async def refresh_tiktok_profile_stats_task(profile_id: int, profile_url: str) -> None:
     """Cập nhật followers + snapshot 5 video mới nhất (views) cho 1 profile."""
     url = (profile_url or "").strip()
     if not url:
         return
 
+    cookie_json = await _get_tiktok_cookie_json()
     try:
-        followers = int(await get_tiktok_followers_count(url))
+        followers = int(await get_tiktok_followers_count(url, cookie_json_text=cookie_json))
     except Exception as exc:
         logger.warning("Không lấy được followers url=%s: %s", url, exc)
         followers = 0
 
     try:
-        latest = await get_tiktok_latest_videos_with_views(url, limit=5)
+        latest = await get_tiktok_latest_videos_with_views(url, limit=5, cookie_json_text=cookie_json)
     except Exception as exc:
         logger.warning("Không lấy được latest videos url=%s: %s", url, exc)
         latest = []
 
     import json as _json
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
 
     async with AsyncSessionLocal() as db:
         await db.execute(
@@ -218,7 +265,7 @@ async def refresh_tiktok_profile_stats_task(profile_id: int, profile_url: str) -
             .values(
                 followers_count=followers,
                 latest_videos_json=_json.dumps(latest, ensure_ascii=False),
-                last_synced_at=_dt.now(),
+                last_synced_at=_dt.now(_tz.utc),
             )
         )
         await db.commit()
@@ -236,6 +283,32 @@ async def refresh_all_tiktok_profiles_stats_task() -> None:
             await refresh_tiktok_profile_stats_task(int(pid), str(url or ""))
         except Exception:
             logger.exception("Sync tiktok profile failed id=%s", pid)
+
+
+async def refresh_all_tiktok_profiles_stats_task_with_run(run_id: int) -> None:
+    """Chạy sync tất cả và ghi nhận trạng thái vào `tiktok_sync_runs`."""
+    started = datetime.now(timezone.utc)
+    status = "success"
+    message = None
+    try:
+        await refresh_all_tiktok_profiles_stats_task()
+    except Exception as exc:
+        status = "failed"
+        message = str(exc)
+        logger.exception("Sync run failed run_id=%s", run_id)
+    finished = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(TikTokSyncRun)
+            .where(TikTokSyncRun.id == run_id)
+            .values(
+                status=status,
+                started_at=started,
+                finished_at=finished,
+                message=message,
+            )
+        )
+        await db.commit()
 
 
 # 1. API: Get list of available video links
@@ -590,14 +663,71 @@ async def dashboard(
 @app.get("/tiktok-profiles")
 async def tiktok_profiles_page(
     request: Request,
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=302)
     
-    stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
+    sort_key = (sort or "").strip().lower()
+    if sort_key == "followers_desc":
+        stmt = select(TikTokProfile).order_by(
+            TikTokProfile.followers_count.desc(),
+            TikTokProfile.created_at.desc(),
+        )
+    else:
+        sort_key = "created_desc"
+        stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
     result = await db.execute(stmt)
     profiles = result.scalars().all()
+
+    # Cookie status
+    cookie_res = await db.execute(
+        select(TikTokCookieSetting).order_by(TikTokCookieSetting.updated_at.desc())
+    )
+    cookie_setting = cookie_res.scalars().first()
+    cookie_status = {
+        "has_cookie": bool(cookie_setting),
+        "expires_at": cookie_setting.expires_at if cookie_setting else None,
+        "expiring_soon": False,
+        "days_left": None,
+    }
+    if cookie_setting and cookie_setting.expires_at:
+        now = datetime.now(timezone.utc)
+        exp = cookie_setting.expires_at
+        # Nếu DB trả naive (hiếm), coi là UTC để tránh crash.
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        delta = exp - now
+        days_left = int(delta.total_seconds() // 86400)
+        cookie_status["days_left"] = days_left
+        cookie_status["expiring_soon"] = days_left <= 7
+
+    # Sync runs (manual + cron)
+    manual_res = await db.execute(
+        select(TikTokSyncRun)
+        .where(TikTokSyncRun.kind == "manual")
+        .order_by(TikTokSyncRun.started_at.desc())
+        .limit(1)
+    )
+    last_manual = manual_res.scalars().first()
+    cron_res = await db.execute(
+        select(TikTokSyncRun)
+        .where(TikTokSyncRun.kind == "cron")
+        .order_by(TikTokSyncRun.started_at.desc())
+        .limit(1)
+    )
+    last_cron = cron_res.scalars().first()
+
+    def _fmt_hcm(dt: Optional[datetime]) -> Optional[str]:
+        if not dt:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d %H:%M")
+
+    last_manual_time = _fmt_hcm((last_manual.finished_at if last_manual else None) or (last_manual.started_at if last_manual else None))
+    last_cron_time = _fmt_hcm((last_cron.finished_at if last_cron else None) or (last_cron.started_at if last_cron else None))
 
     # Chuẩn hoá snapshot latest videos để template render dễ (list dài đúng 5)
     import json as _json
@@ -620,9 +750,51 @@ async def tiktok_profiles_page(
         name="tiktok_profiles.html",
         context={
             "profiles": profiles,
+            "cookie_status": cookie_status,
+            "cookie_json_saved": cookie_setting.cookie_json if cookie_setting else "",
+            "last_manual_sync": last_manual,
+            "last_cron_sync": last_cron,
+            "last_manual_sync_time_hcm": last_manual_time,
+            "last_cron_sync_time_hcm": last_cron_time,
+            "sort": sort_key,
             "active_menu": "tiktok"
         }
     )
+
+
+@app.post(
+    "/api/tiktok-cookie",
+    dependencies=[Depends(require_login_api)],
+)
+async def upsert_tiktok_cookie(
+    request: Request,
+    cookie_json: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    raw = (cookie_json or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="cookie_json is required")
+    expires_at = _compute_cookie_expires_at(raw)
+    res = await db.execute(select(TikTokCookieSetting).order_by(TikTokCookieSetting.updated_at.desc()))
+    setting = res.scalars().first()
+    if setting:
+        setting.cookie_json = raw
+        setting.expires_at = expires_at
+    else:
+        setting = TikTokCookieSetting(cookie_json=raw, expires_at=expires_at)
+        db.add(setting)
+    await db.commit()
+    return RedirectResponse("/tiktok-profiles", status_code=303)
+
+
+@app.post(
+    "/api/tiktok-cookie/delete",
+    dependencies=[Depends(require_login_api)],
+)
+async def delete_tiktok_cookie(db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(TikTokCookieSetting))
+    await db.commit()
+    return RedirectResponse("/tiktok-profiles", status_code=303)
 
 
 @app.post(
@@ -634,8 +806,14 @@ async def sync_tiktok_profiles(background_tasks: BackgroundTasks):
     Chạy sync để update lại followers + view 5 video mới nhất cho tất cả kênh TikTok.
     Thực thi ở background để không block request.
     """
-    background_tasks.add_task(refresh_all_tiktok_profiles_stats_task)
-    return {"ok": True, "started": True}
+    async with AsyncSessionLocal() as db:
+        run = TikTokSyncRun(kind="manual", status="running")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        run_id = int(run.id)
+    background_tasks.add_task(refresh_all_tiktok_profiles_stats_task_with_run, run_id)
+    return {"ok": True, "started": True, "run_id": run_id}
 
 @app.post("/api/tiktok-profiles/import")
 async def import_tiktok_profiles(

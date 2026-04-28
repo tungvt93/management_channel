@@ -22,7 +22,7 @@ if [ ! -f /app/scripts/update_tiktok_followers.py ]; then
 import asyncio
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -72,7 +72,7 @@ async def main() -> None:
                 print(f"[WARN] Lỗi lấy view 5 video mới nhất: {url} -> {exc}")
             else:
                 p.latest_videos_json = json.dumps(latest_videos, ensure_ascii=False)
-                p.last_synced_at = datetime.now()
+                p.last_synced_at = datetime.now(timezone.utc)
                 videos_updated += 1
             print(url, "followers=", _as_int(p.followers_count), "videos=", len(latest_videos))
         await db.commit()

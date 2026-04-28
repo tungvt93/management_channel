@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TikTok Channel Management - Channel Manager</title>
-    <link rel="stylesheet" href="/static/style.css?v=2.7">
+    <link rel="stylesheet" href="/static/style.css?v=2.9">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -25,6 +25,42 @@
 
         <div class="grid" style="grid-template-columns: 1fr;">
             <section class="card">
+                <h2>TikTok Cookie</h2>
+                <div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+                    <div style="flex:1; min-width: 280px;">
+                        {% if cookie_status and cookie_status.has_cookie %}
+                            <div class="text-muted" style="margin-left:0;">
+                                {% if cookie_status.expires_at %}
+                                    Hết hạn dự kiến: <b>{{ cookie_status.expires_at.strftime('%Y-%m-%d %H:%M') }}</b>
+                                    {% if cookie_status.expiring_soon %}
+                                        <span style="color:#fbbf24; font-weight:700;">(Sắp hết hạn)</span>
+                                    {% endif %}
+                                {% else %}
+                                    Không xác định hạn (cookie không có `expirationDate`).
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <div class="text-muted" style="margin-left:0;">
+                                Chưa có cookie trong DB. (Hệ thống sẽ fallback sang file <code>cookie.json</code> nếu có.)
+                            </div>
+                        {% endif %}
+
+                        <form action="/api/tiktok-cookie" method="POST" style="margin-top: 0.75rem;">
+                            <textarea
+                                name="cookie_json"
+                                rows="6"
+                                placeholder="Paste toàn bộ nội dung cookie.json export (dạng JSON array)..."
+                                style="width:100%; resize: vertical; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; color: white; padding: 0.8rem 1.2rem; border-radius: 0.75rem; outline: none; font-size: 0.9rem;"
+                            >{{ cookie_json_saved or "" }}</textarea>
+                            <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:0.75rem; flex-wrap:wrap;">
+                                <button type="submit" class="btn-secondary">Lưu cookie</button>
+                            </div>
+                        </form>
+                        <form action="/api/tiktok-cookie/delete" method="POST" style="margin-top:0.5rem; display:flex; justify-content:flex-end;" onsubmit="return confirm('Xoá cookie trong DB?')">
+                            <button type="submit" class="btn-danger">Xoá cookie</button>
+                        </form>
+                    </div>
+                </div>
                 <h2>Import TikTok Channels</h2>
                 <div class="import-section">
                     <div style="display: flex; flex-direction: column; gap: 0.5rem; flex: 1;">
@@ -52,8 +88,33 @@
                 <div class="section-header tiktok-list-header">
                     <h2>TikTok Channel List</h2>
                     <div class="tiktok-list-actions">
+                        <select
+                            id="tiktok-sort-select"
+                            class="form-select"
+                            onchange="onTikTokSortChange(this.value)"
+                            style="background: rgba(30,41,59,0.5); color: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 0.5rem;"
+                        >
+                            <option value="created_desc" {% if (sort or '') == 'created_desc' %}selected{% endif %}>Mới nhất</option>
+                            <option value="followers_desc" {% if (sort or '') == 'followers_desc' %}selected{% endif %}>Followers ↓</option>
+                        </select>
                         <button type="button" id="btn-sync-tiktok" onclick="syncTikTokProfiles()">Sync dữ liệu</button>
                         <div class="stats">Total: {{ profiles|length }}</div>
+                        <div class="text-muted" style="font-size:0.75rem; margin-left:0;">
+                            Manual:
+                            {% if last_manual_sync_time_hcm %}
+                                {{ last_manual_sync_time_hcm }}
+                                ({{ last_manual_sync.status }})
+                            {% else %}
+                                -
+                            {% endif %}
+                            · Cron:
+                            {% if last_cron_sync_time_hcm %}
+                                {{ last_cron_sync_time_hcm }}
+                                ({{ last_cron_sync.status }})
+                            {% else %}
+                                -
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
                 <div class="data-table-container tiktok-list-table-container">
@@ -230,6 +291,18 @@
                 btn.disabled = false;
                 btn.textContent = 'Import CSV';
             }
+        }
+    </script>
+
+    <script>
+        function onTikTokSortChange(sortValue) {
+            const url = new URL(window.location);
+            if (sortValue && sortValue !== 'created_desc') {
+                url.searchParams.set('sort', sortValue);
+            } else {
+                url.searchParams.delete('sort');
+            }
+            window.location.href = url.toString();
         }
     </script>
 
