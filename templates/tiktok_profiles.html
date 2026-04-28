@@ -60,6 +60,7 @@
                                 <th>Channel URL</th>
                                 <th>Followers</th>
                                 <th>Note</th>
+                                <th>Người quản lý</th>
                                 <th>Trạng thái upload</th>
                                 <th>Added At</th>
                                 <th style="text-align: right;">Actions</th>
@@ -94,6 +95,21 @@
                                         <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
+                                {% set manager_val = profile.manager if profile.manager is string else (profile.manager.value if profile.manager else '') %}
+                                <td>
+                                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                                        <select
+                                            class="tiktok-manager-select"
+                                            data-profile-id="{{ profile.id }}"
+                                            style="background: rgba(15,23,42,0.4); color: white; border: 1px solid var(--border); padding: 0.35rem 0.5rem; border-radius: 0.4rem; font-size: 0.8rem;"
+                                        >
+                                            <option value="" {% if not manager_val %}selected{% endif %}>—</option>
+                                            <option value="tung" {% if manager_val == 'tung' %}selected{% endif %}>Tùng</option>
+                                            <option value="long" {% if manager_val == 'long' %}selected{% endif %}>Long</option>
+                                        </select>
+                                        <span class="text-muted tiktok-manager-save-status" data-profile-id="{{ profile.id }}" style="font-size: 0.7rem; margin-left: 0;"></span>
+                                    </div>
+                                </td>
                                 <td>
                                     <select
                                         class="tiktok-upload-status-select"
@@ -126,7 +142,7 @@
                             {% endfor %}
                             {% if not profiles %}
                             <tr>
-                                <td colspan="6" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                <td colspan="7" style="text-align: center; padding: 4rem; color: var(--text-muted);">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                                     Chưa có kênh nào được thêm.
                                 </td>
@@ -195,6 +211,44 @@
                 btn.textContent = 'Import CSV';
             }
         }
+    </script>
+
+    <script>
+        // Autosave TikTok profile manager dropdown
+        document.querySelectorAll(".tiktok-manager-select").forEach((sel) => {
+            sel.addEventListener("change", async () => {
+                const profileId = sel.dataset.profileId;
+                const value = sel.value || "";
+                const badge = document.querySelector(`.tiktok-manager-save-status[data-profile-id="${profileId}"]`);
+                if (badge) badge.textContent = "Đang lưu...";
+
+                const body = new URLSearchParams();
+                body.set("manager", value);
+
+                try {
+                    const resp = await fetch(`/api/tiktok-profiles/${profileId}/manager`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                        body: body.toString(),
+                    });
+
+                    if (!resp.ok) {
+                        if (badge) badge.textContent = "Lỗi";
+                        const txt = await resp.text();
+                        alert("Lưu người quản lý thất bại: " + txt);
+                        return;
+                    }
+
+                    if (badge) {
+                        badge.textContent = "Đã lưu";
+                        setTimeout(() => (badge.textContent = ""), 1200);
+                    }
+                } catch (err) {
+                    if (badge) badge.textContent = "Lỗi";
+                    alert("Lỗi kết nối khi lưu người quản lý");
+                }
+            });
+        });
     </script>
 
     <!-- Edit Modal -->

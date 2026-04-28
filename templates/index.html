@@ -79,20 +79,6 @@
                                     {% if ss == 'in_progress' %}⏳ Đang quét...{% elif ss == 'success' %}✅ Hoàn thành{% elif ss == 'failed' %}❌ Thất bại{% else %}⬜ Chờ{% endif %}
                                 </span>
                             </div>
-                            {% set manager_val = channel.manager if channel.manager is string else (channel.manager.value if channel.manager else '') %}
-                            <div style="display:flex; gap: 0.5rem; align-items:center;">
-                                <span class="text-muted" style="font-size: 0.75rem; margin-left: 0;">Người quản lý</span>
-                                <select
-                                    class="channel-manager form-select"
-                                    data-channel-id="{{ channel.id }}"
-                                    style="background: rgba(15,23,42,0.4); color: white; border: 1px solid var(--border); padding: 0.35rem 0.5rem; border-radius: 0.4rem; font-size: 0.8rem;"
-                                >
-                                    <option value="" {% if not manager_val %}selected{% endif %}>—</option>
-                                    <option value="tung" {% if manager_val == 'tung' %}selected{% endif %}>Tùng</option>
-                                    <option value="long" {% if manager_val == 'long' %}selected{% endif %}>Long</option>
-                                </select>
-                                <span class="text-muted manager-save-status" data-channel-id="{{ channel.id }}" style="font-size: 0.7rem; margin-left: 0;"></span>
-                            </div>
                             <div class="text-muted" style="font-size: 0.7rem; margin-left: 0; display: flex; justify-content: space-between; align-items: center;">
                                 <span>Added {{ channel.created_at.strftime('%Y-%m-%d') }}</span>
                                 <div style="display:flex; gap: 0.5rem; align-items:center;">
@@ -303,42 +289,6 @@
             url.searchParams.set('page', page);
             window.location.href = url.toString();
         }
-
-        // Autosave channel manager dropdown
-        document.querySelectorAll(".channel-manager").forEach((sel) => {
-            sel.addEventListener("change", async () => {
-                const channelId = sel.dataset.channelId;
-                const value = sel.value || "";
-                const badge = document.querySelector(`.manager-save-status[data-channel-id="${channelId}"]`);
-                if (badge) badge.textContent = "Đang lưu...";
-
-                const body = new URLSearchParams();
-                body.set("manager", value);
-
-                try {
-                    const resp = await fetch(`/api/channels/${channelId}/manager`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                        body: body.toString(),
-                    });
-
-                    if (!resp.ok) {
-                        if (badge) badge.textContent = "Lỗi";
-                        const txt = await resp.text();
-                        alert("Lưu người quản lý thất bại: " + txt);
-                        return;
-                    }
-
-                    if (badge) {
-                        badge.textContent = "Đã lưu";
-                        setTimeout(() => (badge.textContent = ""), 1200);
-                    }
-                } catch (err) {
-                    if (badge) badge.textContent = "Lỗi";
-                    alert("Lỗi kết nối khi lưu người quản lý");
-                }
-            });
-        });
 
         // Polling for in-progress channels
         const statusLabels = {

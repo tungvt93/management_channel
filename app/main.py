@@ -712,5 +712,31 @@ async def update_tiktok_profile_upload_status(
     await db.commit()
     return {"ok": True, "upload_status": upload_status}
 
+
+@app.post("/api/tiktok-profiles/{profile_id}/manager")
+async def update_tiktok_profile_manager(
+    profile_id: int,
+    manager: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    m = (manager or "").strip().lower()
+    if m == "":
+        new_value = None
+    elif m in {ChannelManager.TUNG.value, ChannelManager.LONG.value}:
+        new_value = ChannelManager(m)
+    else:
+        raise HTTPException(status_code=400, detail="manager không hợp lệ")
+
+    stmt = select(TikTokProfile).where(TikTokProfile.id == profile_id)
+    result = await db.execute(stmt)
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile không tồn tại")
+
+    profile.manager = new_value
+    await db.commit()
+    return {"ok": True, "profile_id": profile_id, "manager": new_value.value if new_value else None}
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

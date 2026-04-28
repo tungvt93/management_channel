@@ -88,6 +88,14 @@ class TikTokProfile(Base):
     url = Column(String, unique=True, index=True, nullable=False)
     followers_count = Column(Integer, default=0)
     note = Column(Text, nullable=True)
+    manager = Column(
+        SQLEnum(
+            ChannelManager,
+            name="channelmanager",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=True,
+    )
     upload_status = Column(
         String(32),
         nullable=False,
