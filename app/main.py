@@ -30,7 +30,7 @@ from .models import (
     TikTokProfile,
     TIKTOK_PROFILE_UPLOAD_STATUSES,
 )
-from .scraper import get_tiktok_videos, get_youtube_videos
+from .scraper import get_tiktok_followers_count, get_tiktok_videos, get_youtube_videos
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,33 @@ async def scrape_channel_task(channel_id: int, channel_url: str, platform: Platf
                 )
             )
             await db.commit()
+
+
+async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: str) -> None:
+    """Cập nhật followers sau khi tạo profile (retry khi lần đầu Playwright/parse trả 0)."""
+    url = (profile_url or "").strip()
+    if not url:
+        return
+    try:
+        n = int(await get_tiktok_followers_count(url))
+    except Exception as exc:
+        logger.warning(
+            "Background: không lấy được followers profile_id=%s url=%s: %s",
+            profile_id,
+            url,
+            exc,
+        )
+        return
+    if n <= 0:
+        return
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(TikTokProfile)
+            .where(TikTokProfile.id == profile_id)
+            .values(followers_count=n)
+        )
+        await db.commit()
+
 
 # 1. API: Get list of available video links
 @app.get(
@@ -554,16 +581,17 @@ async def import_tiktok_profiles(
 
 @app.post("/api/tiktok-profiles")
 async def add_tiktok_profile(
+    background_tasks: BackgroundTasks,
     url: str = Form(...),
     note: str = Form(""),
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(require_login_api)
+    user_id: int = Depends(require_login_api),
 ):
     stmt = select(TikTokProfile).where(TikTokProfile.url == url)
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Profile already exists")
-    
+
     followers_count = 0
     try:
         followers_count = int(await get_tiktok_followers_count(url))
@@ -574,6 +602,13 @@ async def add_tiktok_profile(
     profile = TikTokProfile(url=url, note=note, followers_count=followers_count)
     db.add(profile)
     await db.commit()
+    await db.refresh(profile)
+    if followers_count == 0:
+        background_tasks.add_task(
+            refresh_tiktok_profile_followers_task,
+            profile.id,
+            profile.url,
+        )
     return RedirectResponse("/tiktok-profiles", status_code=303)
 
 @app.post("/api/tiktok-profiles/{profile_id}/delete")
@@ -626,7 +661,7 @@ async def update_tiktok_profile(
     profile.note = note or None
     await db.commit()
     return RedirectResponse("/tiktok-profiles", status_code=303)
-    
+
 @app.post("/api/tiktok-profiles/{profile_id}/upload-status")
 async def update_tiktok_profile_upload_status(
     profile_id: int,

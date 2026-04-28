@@ -276,22 +276,83 @@ async def get_tiktok_videos(channel_url: str):
 def _parse_tiktok_follower_count_from_html(html: str) -> Optional[int]:
     """
     Parse followerCount từ HTML TikTok profile page.
-    TikTok thường embed JSON có key "followerCount".
+    TikTok thường embed JSON có key "followerCount" hoặc "follower_count".
     """
     if not html:
         return None
-    # Lấy tất cả followerCount xuất hiện và chọn số lớn nhất để tránh trúng field phụ.
-    # Ví dụ: "followerCount":123456
     import re
 
-    matches = re.findall(r'"followerCount"\s*:\s*(\d+)', html)
-    if not matches:
+    # Ví dụ: "followerCount":123456 hoặc 'follower_count': 123456
+    patterns = (
+        r'"followerCount"\s*:\s*(\d+)',
+        r"'followerCount'\s*:\s*(\d+)",
+        r'"follower_count"\s*:\s*(\d+)',
+        r"'follower_count'\s*:\s*(\d+)",
+    )
+    all_nums: list[int] = []
+    for pat in patterns:
+        for x in re.findall(pat, html):
+            try:
+                all_nums.append(int(x))
+            except ValueError:
+                continue
+    return max(all_nums) if all_nums else None
+
+
+def _parse_follower_display_text(text: str) -> Optional[int]:
+    """
+    Parse số follower từ text UI TikTok: '1.2M', '500K', '830,3K', '1,234,567'.
+    """
+    import re
+
+    if not text:
         return None
-    try:
-        nums = [int(x) for x in matches]
-    except ValueError:
+    raw = text.strip().replace("\u00a0", "").replace(" ", "")
+    if not raw:
         return None
-    return max(nums) if nums else None
+    low = raw.lower().replace("followers", "").replace("follower", "").strip()
+    for suf, mult in (("b", 1_000_000_000), ("m", 1_000_000), ("k", 1_000)):
+        if low.endswith(suf):
+            nump = low[: -len(suf)].strip()
+            if not nump:
+                return None
+            # Một dấu phẩy duy nhất thường là thập phân (locale EU); còn lại coi là phân cách nghìn
+            if nump.count(",") == 1 and nump.count(".") == 0:
+                nump = nump.replace(",", ".")
+            else:
+                nump = nump.replace(",", "")
+            try:
+                return int(round(float(nump) * mult))
+            except ValueError:
+                return None
+    digits = re.sub(r"[^\d]", "", raw)
+    if digits:
+        return int(digits)
+    return None
+
+
+async def _tiktok_followers_from_dom(page: Any) -> Optional[int]:
+    """Đọc số follower từ phần tử TikTok render (ổn định hơn khi JSON không còn trong HTML)."""
+    selectors = (
+        'strong[data-e2e="followers-count"]',
+        '[data-e2e="followers-count"]',
+    )
+    for sel in selectors:
+        try:
+            await page.wait_for_selector(sel, timeout=15_000, state="attached")
+        except Exception:
+            continue
+        el = await page.query_selector(sel)
+        if not el:
+            continue
+        try:
+            text = await el.text_content()
+        except Exception:
+            continue
+        n = _parse_follower_display_text(text or "")
+        if n is not None and n >= 0:
+            return n
+    return None
 
 
 async def get_tiktok_followers_count(profile_url: str) -> int:
@@ -326,10 +387,16 @@ async def get_tiktok_followers_count(profile_url: str) -> int:
             parsed = _parse_tiktok_follower_count_from_html(html)
             if parsed is not None:
                 return int(parsed)
-            # Fallback: thử đọc innerText để bắt trường hợp TikTok render theo text.
+            # Fallback DOM: TikTok hay ẩn JSON nhưng vẫn render metric trên UI.
+            dom_n = await _tiktok_followers_from_dom(page)
+            if dom_n is not None:
+                return int(dom_n)
+            # Fallback: innerText body rồi grep JSON lần nữa.
             body_text = await page.inner_text("body")
             parsed2 = _parse_tiktok_follower_count_from_html(body_text)
-            return int(parsed2 or 0)
+            if parsed2 is not None:
+                return int(parsed2)
+            return 0
         finally:
             await context.close()
             await browser.close()
