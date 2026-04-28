@@ -207,6 +207,55 @@ button:active {
 .badge-tiktok { background: rgba(0, 0, 0, 0.3); color: #fff; border: 1px solid rgba(255, 255, 255, 0.1); }
 .badge-youtube { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
 
+.tiktok-upload-status-select {
+    min-width: 9.5rem;
+    max-width: 100%;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.6);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.tiktok-upload-status-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.note-cell {
+    max-width: 22rem;
+    vertical-align: top;
+}
+
+.note-expandable {
+    display: inline-block;
+    margin-left: 0;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2em;
+    word-break: break-word;
+    line-height: 1.45;
+}
+
+.note-expandable:hover {
+    color: var(--primary);
+}
+
+.note-expandable:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+}
+
+.note-expandable.note-expanded {
+    text-decoration: none;
+    white-space: pre-wrap;
+}
+
 .btn-danger {
     background: rgba(239, 68, 68, 0.1);
     color: #f87171;

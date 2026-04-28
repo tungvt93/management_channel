@@ -20,8 +20,17 @@ import io
 
 from .auth import verify_password
 from .database import AsyncSessionLocal, get_db, init_db
-from .models import Channel, Platform, ScrapingStatus, User, VideoLink, VideoStatus, TikTokProfile
-from .scraper import get_tiktok_followers_count, get_tiktok_videos, get_youtube_videos
+from .models import (
+    Channel,
+    Platform,
+    ScrapingStatus,
+    User,
+    VideoLink,
+    VideoStatus,
+    TikTokProfile,
+    TIKTOK_PROFILE_UPLOAD_STATUSES,
+)
+from .scraper import get_tiktok_videos, get_youtube_videos
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +626,27 @@ async def update_tiktok_profile(
     profile.note = note or None
     await db.commit()
     return RedirectResponse("/tiktok-profiles", status_code=303)
+    
+@app.post("/api/tiktok-profiles/{profile_id}/upload-status")
+async def update_tiktok_profile_upload_status(
+    profile_id: int,
+    upload_status: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    if upload_status not in TIKTOK_PROFILE_UPLOAD_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"upload_status không hợp lệ: {upload_status!r}",
+        )
+    stmt = select(TikTokProfile).where(TikTokProfile.id == profile_id)
+    result = await db.execute(stmt)
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile không tồn tại")
+    profile.upload_status = upload_status
+    await db.commit()
+    return {"ok": True, "upload_status": upload_status}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

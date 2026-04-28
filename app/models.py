@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text, text
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
 import enum
@@ -19,6 +19,19 @@ class ScrapingStatus(str, enum.Enum):
     IN_PROGRESS = "in_progress"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+# Trạng thái upload (tab TikTok Channels) — giá trị lưu DB
+TIKTOK_PROFILE_UPLOAD_PENDING = "pending"
+TIKTOK_PROFILE_UPLOAD_IN_PROGRESS = "in_progress"
+TIKTOK_PROFILE_UPLOAD_UPLOADED = "uploaded"
+TIKTOK_PROFILE_UPLOAD_STATUSES = frozenset(
+    {
+        TIKTOK_PROFILE_UPLOAD_PENDING,
+        TIKTOK_PROFILE_UPLOAD_IN_PROGRESS,
+        TIKTOK_PROFILE_UPLOAD_UPLOADED,
+    }
+)
 
 
 class Channel(Base):
@@ -63,4 +76,9 @@ class TikTokProfile(Base):
     url = Column(String, unique=True, index=True, nullable=False)
     followers_count = Column(Integer, default=0)
     note = Column(Text, nullable=True)
+    upload_status = Column(
+        String(32),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())

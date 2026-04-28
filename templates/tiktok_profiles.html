@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TikTok Channel Management - Channel Manager</title>
-    <link rel="stylesheet" href="/static/style.css?v=2.1">
+    <link rel="stylesheet" href="/static/style.css?v=2.2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -60,12 +60,14 @@
                                 <th>Channel URL</th>
                                 <th>Followers</th>
                                 <th>Note</th>
+                                <th>Trạng thái upload</th>
                                 <th>Added At</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for profile in profiles %}
+                            {% set us = profile.upload_status if profile.upload_status else 'pending' %}
                             <tr>
                                 <td>
                                     <a href="{{ profile.url }}" target="_blank" class="item-url">{{ profile.url }}</a>
@@ -73,8 +75,35 @@
                                 <td>
                                     <span class="badge badge-tiktok">{{ "{:,}".format(profile.followers_count) }}</span>
                                 </td>
+                                <td class="note-cell">
+                                    {% if profile.note %}
+                                        {% if profile.note|length > 100 %}
+                                            <template id="note-full-{{ profile.id }}">{{ profile.note }}</template>
+                                            <span
+                                                class="note-expandable text-muted"
+                                                role="button"
+                                                tabindex="0"
+                                                aria-expanded="false"
+                                                title="Click để xem đầy đủ / thu gọn"
+                                                data-template-id="note-full-{{ profile.id }}"
+                                            >{{ profile.note[:100] }}...</span>
+                                        {% else %}
+                                            <span class="text-muted">{{ profile.note }}</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
                                 <td>
-                                    <span class="text-muted" style="margin-left: 0;">{{ profile.note or '-' }}</span>
+                                    <select
+                                        class="tiktok-upload-status-select"
+                                        data-prev="{{ us }}"
+                                        onchange="updateUploadStatus({{ profile.id }}, this)"
+                                    >
+                                        <option value="pending" {% if us == 'pending' %}selected{% endif %}>Chưa upload</option>
+                                        <option value="in_progress" {% if us == 'in_progress' %}selected{% endif %}>Đang upload</option>
+                                        <option value="uploaded" {% if us == 'uploaded' %}selected{% endif %}>Đã upload</option>
+                                    </select>
                                 </td>
                                 <td>
                                     <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ profile.created_at.strftime('%Y-%m-%d') }}</span>
@@ -97,7 +126,7 @@
                             {% endfor %}
                             {% if not profiles %}
                             <tr>
-                                <td colspan="5" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                <td colspan="6" style="text-align: center; padding: 4rem; color: var(--text-muted);">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                                     Chưa có kênh nào được thêm.
                                 </td>
@@ -111,6 +140,28 @@
     </div>
 
     <script>
+        async function updateUploadStatus(profileId, selectEl) {
+            const prev = selectEl.getAttribute('data-prev') || selectEl.value;
+            const formData = new FormData();
+            formData.append('upload_status', selectEl.value);
+            try {
+                const response = await fetch('/api/tiktok-profiles/' + profileId + '/upload-status', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    alert(data.detail || 'Không lưu được trạng thái');
+                    selectEl.value = prev;
+                    return;
+                }
+                selectEl.setAttribute('data-prev', selectEl.value);
+            } catch (err) {
+                alert('Lỗi kết nối');
+                selectEl.value = prev;
+            }
+        }
+
         async function importCSV() {
             const fileInput = document.getElementById('csv-file');
             if (!fileInput.files.length) {
@@ -197,6 +248,37 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeEditModal();
         });
+
+        const NOTE_TRUNC_LEN = 100;
+
+        function initNoteExpandables() {
+            document.querySelectorAll('.note-expandable').forEach((span) => {
+                const tmplId = span.getAttribute('data-template-id');
+                const tmpl = tmplId ? document.getElementById(tmplId) : null;
+                const fullText = tmpl && tmpl.content ? tmpl.content.textContent : '';
+                const truncated =
+                    fullText.length > NOTE_TRUNC_LEN
+                        ? fullText.slice(0, NOTE_TRUNC_LEN) + '...'
+                        : fullText;
+                let expanded = false;
+
+                span.addEventListener('click', () => {
+                    expanded = !expanded;
+                    span.textContent = expanded ? fullText : truncated;
+                    span.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                    span.classList.toggle('note-expanded', expanded);
+                });
+
+                span.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        span.click();
+                    }
+                });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', initNoteExpandables);
     </script>
 </body>
 </html>
