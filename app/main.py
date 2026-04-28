@@ -664,6 +664,8 @@ async def dashboard(
 async def tiktok_profiles_page(
     request: Request,
     sort: Optional[str] = None,
+    manager: Optional[str] = None,
+    status: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
     db: AsyncSession = Depends(get_db),
@@ -690,7 +692,26 @@ async def tiktok_profiles_page(
         sort_key = "created_desc"
         base_stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
 
-    total_count_res = await db.execute(select(func.count()).select_from(TikTokProfile))
+    manager_filter = (manager or "").strip().lower()
+    if manager_filter not in {"", ChannelManager.TUNG.value, ChannelManager.LONG.value}:
+        manager_filter = ""
+
+    status_filter = (status or "").strip().lower()
+    if status_filter and status_filter not in TIKTOK_PROFILE_UPLOAD_STATUSES:
+        status_filter = ""
+
+    if manager_filter:
+        base_stmt = base_stmt.where(TikTokProfile.manager == ChannelManager(manager_filter))
+    if status_filter:
+        base_stmt = base_stmt.where(TikTokProfile.upload_status == status_filter)
+
+    total_count_stmt = select(func.count()).select_from(TikTokProfile)
+    if manager_filter:
+        total_count_stmt = total_count_stmt.where(TikTokProfile.manager == ChannelManager(manager_filter))
+    if status_filter:
+        total_count_stmt = total_count_stmt.where(TikTokProfile.upload_status == status_filter)
+
+    total_count_res = await db.execute(total_count_stmt)
     total_count = int(total_count_res.scalar() or 0)
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     if page > total_pages:
@@ -781,6 +802,8 @@ async def tiktok_profiles_page(
             "last_manual_sync_time_hcm": last_manual_time,
             "last_cron_sync_time_hcm": last_cron_time,
             "sort": sort_key,
+            "manager_filter": manager_filter,
+            "status_filter": status_filter,
             "active_menu": "tiktok"
         }
     )

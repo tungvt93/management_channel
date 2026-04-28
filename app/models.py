@@ -26,14 +26,16 @@ class ChannelManager(str, enum.Enum):
 
 
 # Trạng thái upload (tab TikTok Channels) — giá trị lưu DB
-TIKTOK_PROFILE_UPLOAD_PENDING = "pending"
-TIKTOK_PROFILE_UPLOAD_IN_PROGRESS = "in_progress"
-TIKTOK_PROFILE_UPLOAD_UPLOADED = "uploaded"
+TIKTOK_PROFILE_UPLOAD_PENDING = "cho_up"  # Chờ up
+TIKTOK_PROFILE_UPLOAD_IN_PROGRESS = "dang_up"  # Đang up
+TIKTOK_PROFILE_UPLOAD_ENABLED = "da_bat"  # Đã bật
+TIKTOK_PROFILE_UPLOAD_SOLD = "da_ban"  # Đã bán
 TIKTOK_PROFILE_UPLOAD_STATUSES = frozenset(
     {
         TIKTOK_PROFILE_UPLOAD_PENDING,
         TIKTOK_PROFILE_UPLOAD_IN_PROGRESS,
-        TIKTOK_PROFILE_UPLOAD_UPLOADED,
+        TIKTOK_PROFILE_UPLOAD_ENABLED,
+        TIKTOK_PROFILE_UPLOAD_SOLD,
     }
 )
 
@@ -102,7 +104,7 @@ class TikTokProfile(Base):
     upload_status = Column(
         String(32),
         nullable=False,
-        server_default=text("'pending'"),
+        server_default=text("'cho_up'"),
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

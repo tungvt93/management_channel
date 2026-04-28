@@ -89,6 +89,28 @@
                     <h2>TikTok Channel List</h2>
                     <div class="tiktok-list-actions">
                         <select
+                            id="tiktok-manager-filter"
+                            class="form-select"
+                            onchange="onTikTokFilterChange()"
+                            style="background: rgba(30,41,59,0.5); color: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 0.5rem;"
+                        >
+                            <option value="" {% if not (manager_filter or '') %}selected{% endif %}>Tất cả người quản lý</option>
+                            <option value="tung" {% if (manager_filter or '') == 'tung' %}selected{% endif %}>Tùng</option>
+                            <option value="long" {% if (manager_filter or '') == 'long' %}selected{% endif %}>Long</option>
+                        </select>
+                        <select
+                            id="tiktok-status-filter"
+                            class="form-select"
+                            onchange="onTikTokFilterChange()"
+                            style="background: rgba(30,41,59,0.5); color: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 0.5rem;"
+                        >
+                            <option value="" {% if not (status_filter or '') %}selected{% endif %}>Tất cả trạng thái</option>
+                            <option value="cho_up" {% if (status_filter or '') == 'cho_up' %}selected{% endif %}>Chờ up</option>
+                            <option value="dang_up" {% if (status_filter or '') == 'dang_up' %}selected{% endif %}>Đang up</option>
+                            <option value="da_bat" {% if (status_filter or '') == 'da_bat' %}selected{% endif %}>Đã bật</option>
+                            <option value="da_ban" {% if (status_filter or '') == 'da_ban' %}selected{% endif %}>Đã bán</option>
+                        </select>
+                        <select
                             id="tiktok-sort-select"
                             class="form-select"
                             onchange="onTikTokSortChange(this.value)"
@@ -137,7 +159,7 @@
                         </thead>
                         <tbody>
                             {% for profile in profiles %}
-                            {% set us = profile.upload_status if profile.upload_status else 'pending' %}
+                            {% set us = profile.upload_status if profile.upload_status else 'cho_up' %}
                             <tr>
                                 <td>
                                     <a href="{{ profile.url }}" target="_blank" class="item-url">{{ profile.url }}</a>
@@ -197,9 +219,10 @@
                                         data-prev="{{ us }}"
                                         onchange="updateUploadStatus({{ profile.id }}, this)"
                                     >
-                                        <option value="pending" {% if us == 'pending' %}selected{% endif %}>Chưa upload</option>
-                                        <option value="in_progress" {% if us == 'in_progress' %}selected{% endif %}>Đang upload</option>
-                                        <option value="uploaded" {% if us == 'uploaded' %}selected{% endif %}>Đã upload</option>
+                                        <option value="cho_up" {% if us == 'cho_up' %}selected{% endif %}>Chờ up</option>
+                                        <option value="dang_up" {% if us == 'dang_up' %}selected{% endif %}>Đang up</option>
+                                        <option value="da_bat" {% if us == 'da_bat' %}selected{% endif %}>Đã bật</option>
+                                        <option value="da_ban" {% if us == 'da_ban' %}selected{% endif %}>Đã bán</option>
                                     </select>
                                 </td>
                                 <td>
@@ -241,15 +264,17 @@
                     <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                         {% set base_sort = sort or 'created_desc' %}
                         {% set ps = page_size if page_size is defined else 50 %}
+                        {% set mf = manager_filter or '' %}
+                        {% set sf = status_filter or '' %}
 
                         {% if current_page > 1 %}
-                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&page={{ current_page - 1 }}&page_size={{ ps }}">← Prev</a>
+                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&manager={{ mf }}&status={{ sf }}&page={{ current_page - 1 }}&page_size={{ ps }}">← Prev</a>
                         {% else %}
                             <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">← Prev</span>
                         {% endif %}
 
                         {% if current_page < total_pages %}
-                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&page={{ current_page + 1 }}&page_size={{ ps }}">Next →</a>
+                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&manager={{ mf }}&status={{ sf }}&page={{ current_page + 1 }}&page_size={{ ps }}">Next →</a>
                         {% else %}
                             <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">Next →</span>
                         {% endif %}
@@ -325,6 +350,26 @@
             } else {
                 url.searchParams.delete('sort');
             }
+            // đổi sort thì quay về trang 1
+            url.searchParams.delete('page');
+            window.location.href = url.toString();
+        }
+    </script>
+
+    <script>
+        function onTikTokFilterChange() {
+            const url = new URL(window.location);
+            const m = document.getElementById("tiktok-manager-filter")?.value || "";
+            const s = document.getElementById("tiktok-status-filter")?.value || "";
+
+            if (m) url.searchParams.set("manager", m);
+            else url.searchParams.delete("manager");
+
+            if (s) url.searchParams.set("status", s);
+            else url.searchParams.delete("status");
+
+            // đổi filter thì quay về trang 1
+            url.searchParams.delete("page");
             window.location.href = url.toString();
         }
     </script>

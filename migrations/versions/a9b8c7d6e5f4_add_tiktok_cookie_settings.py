@@ -19,19 +19,34 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "tiktok_cookie_settings",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("cookie_json", sa.Text(), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
+    # Một số môi trường dev có thể đã tạo bảng thủ công / chạy nửa chừng;
+    # dùng DDL idempotent để tránh fail khi bảng đã tồn tại.
+    conn = op.get_bind()
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE IF NOT EXISTS tiktok_cookie_settings (
+                id SERIAL PRIMARY KEY,
+                cookie_json TEXT NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+            );
+            """
+        )
     )
-    op.create_index(op.f("ix_tiktok_cookie_settings_id"), "tiktok_cookie_settings", ["id"], unique=False)
+    conn.execute(
+        sa.text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tiktok_cookie_settings_id
+            ON tiktok_cookie_settings (id);
+            """
+        )
+    )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_tiktok_cookie_settings_id"), table_name="tiktok_cookie_settings")
-    op.drop_table("tiktok_cookie_settings")
+    conn = op.get_bind()
+    conn.execute(sa.text("DROP INDEX IF EXISTS ix_tiktok_cookie_settings_id;"))
+    conn.execute(sa.text("DROP TABLE IF EXISTS tiktok_cookie_settings;"))
 
