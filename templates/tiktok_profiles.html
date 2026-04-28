@@ -78,19 +78,16 @@
                                 </td>
                                 <td class="note-cell">
                                     {% if profile.note %}
-                                        {% if profile.note|length > 100 %}
-                                            <template id="note-full-{{ profile.id }}">{{ profile.note }}</template>
-                                            <span
-                                                class="note-expandable text-muted"
-                                                role="button"
-                                                tabindex="0"
-                                                aria-expanded="false"
-                                                title="Click để xem đầy đủ / thu gọn"
-                                                data-template-id="note-full-{{ profile.id }}"
-                                            >{{ profile.note[:100] }}...</span>
-                                        {% else %}
-                                            <span class="text-muted">{{ profile.note }}</span>
-                                        {% endif %}
+                                        <span class="note-preview text-muted" title="{{ profile.note }}">
+                                            {{ profile.note[:10] }}{% if profile.note|length > 10 %}…{% endif %}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            class="note-info-btn"
+                                            aria-label="Xem ghi chú"
+                                            data-note-json='{{ (profile.note or "")|tojson }}'
+                                            onclick="openNoteModal(this)"
+                                        >ℹ︎</button>
                                     {% else %}
                                         <span class="text-muted">-</span>
                                     {% endif %}
@@ -303,36 +300,41 @@
             if (e.key === 'Escape') closeEditModal();
         });
 
-        const NOTE_TRUNC_LEN = 100;
+        function openNoteModal(btn) {
+            let note = '';
+            try {
+                note = btn.dataset.noteJson ? JSON.parse(btn.dataset.noteJson) : '';
+            } catch (e) {
+                note = '';
+            }
 
-        function initNoteExpandables() {
-            document.querySelectorAll('.note-expandable').forEach((span) => {
-                const tmplId = span.getAttribute('data-template-id');
-                const tmpl = tmplId ? document.getElementById(tmplId) : null;
-                const fullText = tmpl && tmpl.content ? tmpl.content.textContent : '';
-                const truncated =
-                    fullText.length > NOTE_TRUNC_LEN
-                        ? fullText.slice(0, NOTE_TRUNC_LEN) + '...'
-                        : fullText;
-                let expanded = false;
-
-                span.addEventListener('click', () => {
-                    expanded = !expanded;
-                    span.textContent = expanded ? fullText : truncated;
-                    span.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-                    span.classList.toggle('note-expanded', expanded);
-                });
-
-                span.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        span.click();
-                    }
-                });
-            });
+            const modal = document.getElementById('note-modal');
+            const content = document.getElementById('note-modal-content');
+            if (content) content.textContent = note || '-';
+            modal.style.display = 'flex';
+            if (btn && typeof btn.blur === 'function') btn.blur();
         }
 
-        document.addEventListener('DOMContentLoaded', initNoteExpandables);
+        function closeNoteModal(e) {
+            if (e && e.target && e.target.id !== 'note-modal') return;
+            const modal = document.getElementById('note-modal');
+            modal.style.display = 'none';
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeNoteModal();
+        });
     </script>
+
+    <!-- Note Modal -->
+    <div id="note-modal" class="modal-overlay" style="display:none;" onclick="closeNoteModal(event)">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="note-modal-title" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="note-modal-title" style="margin:0;">Note</h3>
+                <button type="button" class="btn-secondary" onclick="closeNoteModal()">Close</button>
+            </div>
+            <div id="note-modal-content" class="note-modal-content"></div>
+        </div>
+    </div>
 </body>
 </html>
