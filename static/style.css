@@ -162,11 +162,13 @@ button:active {
 
 .tiktok-table {
     table-layout: fixed;
+    min-width: 980px;
 }
 
+/* Don't clip action buttons; let container scroll horizontally when needed */
 .tiktok-table th,
 .tiktok-table td {
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Column sizing for TikTok table to avoid overlap */
@@ -220,6 +222,12 @@ button:active {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Keep action buttons visible */
+.tiktok-table th:last-child,
+.tiktok-table td:last-child {
+    white-space: nowrap;
 }
 
 .item-url:hover {
