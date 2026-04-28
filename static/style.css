@@ -160,6 +160,29 @@ button:active {
     background: rgba(30, 41, 59, 0.3);
 }
 
+.tiktok-table {
+    table-layout: fixed;
+}
+
+.tiktok-table th,
+.tiktok-table td {
+    overflow: hidden;
+}
+
+/* Column sizing for TikTok table to avoid overlap */
+.tiktok-table th:nth-child(1),
+.tiktok-table td:nth-child(1) { width: 28%; }
+.tiktok-table th:nth-child(2),
+.tiktok-table td:nth-child(2) { width: 8rem; }
+.tiktok-table th:nth-child(3),
+.tiktok-table td:nth-child(3) { width: 28%; }
+.tiktok-table th:nth-child(4),
+.tiktok-table td:nth-child(4) { width: 12rem; }
+.tiktok-table th:nth-child(5),
+.tiktok-table td:nth-child(5) { width: 8rem; }
+.tiktok-table th:nth-child(6),
+.tiktok-table td:nth-child(6) { width: 10.5rem; }
+
 .data-table th {
     background: rgba(15, 23, 42, 0.4);
     color: var(--text-muted);
@@ -190,6 +213,13 @@ button:active {
     text-decoration: none;
     font-weight: 600;
     transition: color 0.2s;
+}
+
+.tiktok-table .item-url {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .item-url:hover {
@@ -229,6 +259,9 @@ button:active {
 .note-cell {
     max-width: 22rem;
     vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .note-expandable {
