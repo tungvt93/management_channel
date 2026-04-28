@@ -64,11 +64,11 @@ app.mount(
     name="static",
 )
 templates = Jinja2Templates(directory=str(_PROJECT_ROOT / "templates"))
-# Dev: tránh Jinja cache template khiến sửa HTML không hiện ngay
+# Tránh Jinja cache template khiến sửa HTML không hiện ngay.
+# (Không ảnh hưởng lớn vì app này chủ yếu render HTML đơn giản.)
 try:
-    if os.getenv("RELOAD", "0") == "1":
-        templates.env.auto_reload = True
-        templates.env.cache = {}
+    templates.env.auto_reload = True
+    templates.env.cache = {}
 except Exception:
     pass
 
@@ -664,20 +664,40 @@ async def dashboard(
 async def tiktok_profiles_page(
     request: Request,
     sort: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=302)
     
+    page = int(page or 1)
+    if page < 1:
+        page = 1
+    page_size = int(page_size or 50)
+    if page_size < 5:
+        page_size = 5
+    if page_size > 200:
+        page_size = 200
+
     sort_key = (sort or "").strip().lower()
     if sort_key == "followers_desc":
-        stmt = select(TikTokProfile).order_by(
+        base_stmt = select(TikTokProfile).order_by(
             TikTokProfile.followers_count.desc(),
             TikTokProfile.created_at.desc(),
         )
     else:
         sort_key = "created_desc"
-        stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
+        base_stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
+
+    total_count_res = await db.execute(select(func.count()).select_from(TikTokProfile))
+    total_count = int(total_count_res.scalar() or 0)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+    offset = (page - 1) * page_size
+
+    stmt = base_stmt.limit(page_size).offset(offset)
     result = await db.execute(stmt)
     profiles = result.scalars().all()
 
@@ -750,6 +770,10 @@ async def tiktok_profiles_page(
         name="tiktok_profiles.html",
         context={
             "profiles": profiles,
+            "current_page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "total_count": total_count,
             "cookie_status": cookie_status,
             "cookie_json_saved": cookie_setting.cookie_json if cookie_setting else "",
             "last_manual_sync": last_manual,

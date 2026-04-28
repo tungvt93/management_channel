@@ -98,7 +98,7 @@
                             <option value="followers_desc" {% if (sort or '') == 'followers_desc' %}selected{% endif %}>Followers ↓</option>
                         </select>
                         <button type="button" id="btn-sync-tiktok" onclick="syncTikTokProfiles()">Sync dữ liệu</button>
-                        <div class="stats">Total: {{ profiles|length }}</div>
+                        <div class="stats">Total: {{ total_count if total_count is defined else (profiles|length) }}</div>
                         <div class="text-muted" style="font-size:0.75rem; margin-left:0;">
                             Manual:
                             {% if last_manual_sync_time_hcm %}
@@ -231,6 +231,29 @@
                             {% endif %}
                         </tbody>
                     </table>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top: 0.9rem; flex-wrap:wrap;">
+                    <div class="text-muted" style="margin-left:0; font-size:0.85rem;">
+                        Trang <b>{{ current_page }}</b> / <b>{{ total_pages }}</b>
+                        · Hiển thị <b>{{ profiles|length }}</b> / <b>{{ total_count }}</b>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                        {% set base_sort = sort or 'created_desc' %}
+                        {% set ps = page_size if page_size is defined else 50 %}
+
+                        {% if current_page > 1 %}
+                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&page={{ current_page - 1 }}&page_size={{ ps }}">← Prev</a>
+                        {% else %}
+                            <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">← Prev</span>
+                        {% endif %}
+
+                        {% if current_page < total_pages %}
+                            <a class="btn-secondary" href="/tiktok-profiles?sort={{ base_sort }}&page={{ current_page + 1 }}&page_size={{ ps }}">Next →</a>
+                        {% else %}
+                            <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">Next →</span>
+                        {% endif %}
+                    </div>
                 </div>
             </section>
         </div>
