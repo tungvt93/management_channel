@@ -31,7 +31,12 @@ from .models import (
     TikTokProfile,
     TIKTOK_PROFILE_UPLOAD_STATUSES,
 )
-from .scraper import get_tiktok_followers_count, get_tiktok_videos, get_youtube_videos
+from .scraper import (
+    get_tiktok_followers_count,
+    get_tiktok_latest_videos_with_views,
+    get_tiktok_videos,
+    get_youtube_videos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +188,54 @@ async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: st
             .values(followers_count=n)
         )
         await db.commit()
+
+
+async def refresh_tiktok_profile_stats_task(profile_id: int, profile_url: str) -> None:
+    """Cập nhật followers + snapshot 5 video mới nhất (views) cho 1 profile."""
+    url = (profile_url or "").strip()
+    if not url:
+        return
+
+    try:
+        followers = int(await get_tiktok_followers_count(url))
+    except Exception as exc:
+        logger.warning("Không lấy được followers url=%s: %s", url, exc)
+        followers = 0
+
+    try:
+        latest = await get_tiktok_latest_videos_with_views(url, limit=5)
+    except Exception as exc:
+        logger.warning("Không lấy được latest videos url=%s: %s", url, exc)
+        latest = []
+
+    import json as _json
+    from datetime import datetime as _dt
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(TikTokProfile)
+            .where(TikTokProfile.id == profile_id)
+            .values(
+                followers_count=followers,
+                latest_videos_json=_json.dumps(latest, ensure_ascii=False),
+                last_synced_at=_dt.now(),
+            )
+        )
+        await db.commit()
+
+
+async def refresh_all_tiktok_profiles_stats_task() -> None:
+    """Cập nhật followers + views (5 video mới nhất) cho tất cả TikTok profiles."""
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(select(TikTokProfile.id, TikTokProfile.url))
+        rows = res.all()
+
+    # Chạy tuần tự để tránh bắn quá nhiều request Playwright/yt-dlp cùng lúc.
+    for pid, url in rows:
+        try:
+            await refresh_tiktok_profile_stats_task(int(pid), str(url or ""))
+        except Exception:
+            logger.exception("Sync tiktok profile failed id=%s", pid)
 
 
 # 1. API: Get list of available video links
@@ -545,6 +598,22 @@ async def tiktok_profiles_page(
     stmt = select(TikTokProfile).order_by(TikTokProfile.created_at.desc())
     result = await db.execute(stmt)
     profiles = result.scalars().all()
+
+    # Chuẩn hoá snapshot latest videos để template render dễ (list dài đúng 5)
+    import json as _json
+    for p in profiles:
+        items = []
+        raw = getattr(p, "latest_videos_json", None)
+        if raw:
+            try:
+                parsed = _json.loads(raw)
+                if isinstance(parsed, list):
+                    items = [x for x in parsed if isinstance(x, dict)]
+            except Exception:
+                items = []
+        if len(items) < 5:
+            items = items + [{} for _ in range(5 - len(items))]
+        setattr(p, "latest_videos", items[:5])
     
     return templates.TemplateResponse(
         request=request,
@@ -554,6 +623,19 @@ async def tiktok_profiles_page(
             "active_menu": "tiktok"
         }
     )
+
+
+@app.post(
+    "/api/tiktok-profiles/sync",
+    dependencies=[Depends(require_login_api)],
+)
+async def sync_tiktok_profiles(background_tasks: BackgroundTasks):
+    """
+    Chạy sync để update lại followers + view 5 video mới nhất cho tất cả kênh TikTok.
+    Thực thi ở background để không block request.
+    """
+    background_tasks.add_task(refresh_all_tiktok_profiles_stats_task)
+    return {"ok": True, "started": True}
 
 @app.post("/api/tiktok-profiles/import")
 async def import_tiktok_profiles(

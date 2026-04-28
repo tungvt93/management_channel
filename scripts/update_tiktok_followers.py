@@ -1,13 +1,15 @@
 """
-Cronjob: quét list TikTok profiles và cập nhật followers_count.
+Cronjob: quét list TikTok profiles và cập nhật followers_count + view 5 video mới nhất.
 
 Chạy thủ công:
   python scripts/update_tiktok_followers.py
 """
 
 import asyncio
+import json
 import os
 import sys
+from datetime import datetime
 from typing import Optional
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -18,7 +20,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app.database import AsyncSessionLocal, init_db  # noqa: E402
 from app.models import TikTokProfile  # noqa: E402
-from app.scraper import get_tiktok_followers_count  # noqa: E402
+from app.scraper import get_tiktok_followers_count, get_tiktok_latest_videos_with_views  # noqa: E402
 
 
 def _as_int(v: Optional[int]) -> int:
@@ -44,7 +46,8 @@ async def main() -> None:
             print("Không có TikTok profile nào để quét.")
             return
 
-        updated = 0
+        followers_updated = 0
+        videos_updated = 0
         for p in profiles:
             url = (p.url or "").strip()
             if not url:
@@ -54,16 +57,29 @@ async def main() -> None:
                 followers = await get_tiktok_followers_count(url)
             except Exception as exc:
                 print(f"[WARN] Lỗi lấy follower: {url} -> {exc}")
-                continue
+            else:
+                followers = _as_int(followers)
+                old = _as_int(p.followers_count)
+                if followers != old:
+                    p.followers_count = followers
+                    followers_updated += 1
 
-            followers = _as_int(followers)
-            old = _as_int(p.followers_count)
-            if followers != old:
-                p.followers_count = followers
-                updated += 1
+            try:
+                latest_videos = await get_tiktok_latest_videos_with_views(url, limit=5)
+            except Exception as exc:
+                print(f"[WARN] Lỗi lấy view 5 video mới nhất: {url} -> {exc}")
+            else:
+                p.latest_videos_json = json.dumps(latest_videos, ensure_ascii=False)
+                p.last_synced_at = datetime.now()
+                videos_updated += 1
 
         await db.commit()
-        print(f"Done. Profiles={len(profiles)}, updated={updated}.")
+        print(
+            "Done. "
+            f"Profiles={len(profiles)}, "
+            f"followers_updated={followers_updated}, "
+            f"video_snapshots_updated={videos_updated}."
+        )
 
 
 if __name__ == "__main__":

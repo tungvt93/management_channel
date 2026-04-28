@@ -149,6 +149,8 @@ button:active {
 
 /* Data Table */
 .data-table-container {
+    width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     border-radius: 0.75rem;
     border: 1px solid var(--border);
@@ -162,28 +164,39 @@ button:active {
 
 .tiktok-table {
     table-layout: fixed;
-    min-width: 980px;
+    min-width: 1600px;
 }
 
 /* Don't clip action buttons; let container scroll horizontally when needed */
 .tiktok-table th,
 .tiktok-table td {
     overflow: visible;
+    white-space: nowrap;
 }
 
 /* Column sizing for TikTok table to avoid overlap */
 .tiktok-table th:nth-child(1),
-.tiktok-table td:nth-child(1) { width: 28%; }
+.tiktok-table td:nth-child(1) { width: 22rem; }
 .tiktok-table th:nth-child(2),
 .tiktok-table td:nth-child(2) { width: 8rem; }
 .tiktok-table th:nth-child(3),
-.tiktok-table td:nth-child(3) { width: 28%; }
+.tiktok-table td:nth-child(3) { width: 7rem; }
 .tiktok-table th:nth-child(4),
-.tiktok-table td:nth-child(4) { width: 12rem; }
+.tiktok-table td:nth-child(4) { width: 7rem; }
 .tiktok-table th:nth-child(5),
-.tiktok-table td:nth-child(5) { width: 8rem; }
+.tiktok-table td:nth-child(5) { width: 7rem; }
 .tiktok-table th:nth-child(6),
-.tiktok-table td:nth-child(6) { width: 10.5rem; }
+.tiktok-table td:nth-child(6) { width: 7rem; }
+.tiktok-table th:nth-child(7),
+.tiktok-table td:nth-child(7) { width: 7rem; }
+.tiktok-table th:nth-child(8),
+.tiktok-table td:nth-child(8) { width: 22rem; }
+.tiktok-table th:nth-child(9),
+.tiktok-table td:nth-child(9) { width: 12rem; }
+.tiktok-table th:nth-child(10),
+.tiktok-table td:nth-child(10) { width: 8rem; }
+.tiktok-table th:nth-child(11),
+.tiktok-table td:nth-child(11) { width: 10.5rem; }
 
 .data-table th {
     background: rgba(15, 23, 42, 0.4);
@@ -194,6 +207,8 @@ button:active {
     letter-spacing: 0.05em;
     padding: 1rem 1.5rem;
     text-align: left;
+    white-space: nowrap;
+    line-height: 1.1;
 }
 
 .data-table td {
@@ -387,6 +402,37 @@ button:active {
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: 2.5rem;
+}
+
+.grid > * {
+    min-width: 0;
+}
+
+.tiktok-list-card {
+    min-width: 0;
+}
+
+.tiktok-list-header {
+    align-items: center;
+    gap: 1rem;
+}
+
+.tiktok-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.tiktok-list-actions #btn-sync-tiktok {
+    padding: 0.55rem 1rem;
+    font-size: 0.85rem;
+}
+
+.tiktok-list-table-container {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .channel-list-scroll {

@@ -20,38 +20,22 @@ if [ ! -f /app/scripts/update_tiktok_followers.py ]; then
   mkdir -p /app/scripts
   cat > /app/scripts/update_tiktok_followers.py <<'PY'
 import asyncio
+import json
 import os
-import re
+from datetime import datetime
 
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal, init_db
 from app.models import TikTokProfile
-from playwright.async_api import async_playwright
+from app.scraper import get_tiktok_followers_count, get_tiktok_latest_videos_with_views
 
 
-def _parse_followers(html: str) -> int:
-    m = re.findall(r'"followerCount"\s*:\s*(\d+)', html or "")
-    if not m:
+def _as_int(v) -> int:
+    try:
+        return int(v or 0)
+    except Exception:
         return 0
-    return max((int(x) for x in m), default=0)
-
-
-async def _get_followers(url: str) -> int:
-    async with async_playwright() as p:
-        b = await p.chromium.launch(headless=True)
-        c = await b.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1365, "height": 768},
-        )
-        pg = await c.new_page()
-        try:
-            await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await pg.wait_for_timeout(2500)
-            return _parse_followers(await pg.content())
-        finally:
-            await c.close()
-            await b.close()
 
 
 async def main() -> None:
@@ -66,23 +50,33 @@ async def main() -> None:
         if not profiles:
             print("Không có TikTok profile nào để quét.")
             return
-        updated = 0
+        followers_updated = 0
+        videos_updated = 0
         for p in profiles:
             url = (p.url or "").strip()
             if not url:
                 continue
+            latest_videos = []
             try:
-                new = int(await _get_followers(url))
+                new = _as_int(await get_tiktok_followers_count(url))
             except Exception as exc:
                 print(f"[WARN] Lỗi lấy follower: {url} -> {exc}")
-                continue
-            old = int(p.followers_count or 0)
-            if new != old:
-                p.followers_count = new
-                updated += 1
-            print(url, "old=", old, "new=", new)
+            else:
+                old = _as_int(p.followers_count)
+                if new != old:
+                    p.followers_count = new
+                    followers_updated += 1
+            try:
+                latest_videos = await get_tiktok_latest_videos_with_views(url, limit=5)
+            except Exception as exc:
+                print(f"[WARN] Lỗi lấy view 5 video mới nhất: {url} -> {exc}")
+            else:
+                p.latest_videos_json = json.dumps(latest_videos, ensure_ascii=False)
+                p.last_synced_at = datetime.now()
+                videos_updated += 1
+            print(url, "followers=", _as_int(p.followers_count), "videos=", len(latest_videos))
         await db.commit()
-        print(f"Done. Profiles={len(profiles)}, updated={updated}.")
+        print(f"Done. Profiles={len(profiles)}, followers_updated={followers_updated}, video_snapshots_updated={videos_updated}.")
 
 
 if __name__ == "__main__":

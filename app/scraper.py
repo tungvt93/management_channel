@@ -273,6 +273,133 @@ async def get_tiktok_videos(channel_url: str):
                 pass
 
 
+def _tiktok_entry_views(ent: dict[str, Any]) -> int:
+    """
+    yt-dlp có thể trả view count dưới nhiều key tuỳ extractor/version.
+    Chuẩn hoá về int >= 0.
+    """
+    for k in ("view_count", "views", "play_count", "playCount", "stats", "statistics"):
+        v = ent.get(k)
+        if isinstance(v, (int, float)):
+            return max(0, int(v))
+        if isinstance(v, dict):
+            for kk in ("viewCount", "playCount", "views", "view_count"):
+                vv = v.get(kk)
+                if isinstance(vv, (int, float)):
+                    return max(0, int(vv))
+    return 0
+
+
+async def get_tiktok_latest_videos_with_views(profile_url: str, limit: int = 5) -> list[dict[str, Any]]:
+    """
+    Lấy danh sách video mới nhất (mặc định 5) kèm view count.
+    Dùng yt-dlp (không extract_flat) để lấy metadata của từng entry.
+    """
+    profile_url = (profile_url or "").strip()
+    if not profile_url or limit <= 0:
+        return []
+
+    cookie_json = Path(os.getenv("TIKTOK_COOKIES_FILE", str(_DEFAULT_COOKIE_PATH))).expanduser()
+    tmp_cookie: Optional[Path] = None
+
+    def _build_tmp_cookie_from_json() -> Optional[Path]:
+        if not cookie_json.is_file():
+            return None
+        try:
+            text = cookie_json.read_text(encoding="utf-8")
+            netscape = _chrome_extension_json_to_netscape(text)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError, TypeError, KeyError, ValueError):
+            return None
+        fd, tmp_name = tempfile.mkstemp(prefix="tiktok_ytdlp_", suffix=".txt", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(netscape)
+        return Path(tmp_name)
+
+    def _extract(cookiefile: Optional[str]):
+        opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            # lấy tối đa 30 entry để sort theo timestamp rồi cắt limit (an toàn khi playlist order không ổn định)
+            "playlistend": max(30, limit),
+            "ignoreerrors": True,
+        }
+        if cookiefile:
+            opts["cookiefile"] = cookiefile
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(profile_url, download=False)
+
+    def _parse_entries(info: Optional[dict]) -> list[dict[str, Any]]:
+        if not info:
+            return []
+        if info.get("_type") == "playlist":
+            return [e for e in (info.get("entries") or []) if isinstance(e, dict)]
+        if isinstance(info, dict):
+            return [info]
+        return []
+
+    try:
+        tmp_cookie = _build_tmp_cookie_from_json()
+        cookie_path_str = str(tmp_cookie) if tmp_cookie is not None else None
+        try:
+            info = await asyncio.to_thread(_extract, cookie_path_str)
+        except (YoutubeDLError, OSError):
+            if cookie_path_str:
+                if tmp_cookie is not None:
+                    try:
+                        tmp_cookie.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    tmp_cookie = None
+                info = await asyncio.to_thread(_extract, None)
+            else:
+                raise
+
+        entries = _parse_entries(info)
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for idx, ent in enumerate(entries):
+            url = _tiktok_entry_video_url(ent, profile_url) or (ent.get("webpage_url") or ent.get("url") or "")
+            if not url:
+                continue
+            url = str(url).split("?")[0]
+            if url in seen:
+                continue
+            seen.add(url)
+            ts = ent.get("timestamp")
+            if isinstance(ts, (int, float)) and ts > 0:
+                if ts > 1e12:
+                    ts = ts / 1000.0
+                ts_int = int(ts)
+            else:
+                ts_int = 0
+            items.append(
+                {
+                    "url": url,
+                    "views": _tiktok_entry_views(ent),
+                    "timestamp": ts_int,
+                    "_idx": idx,
+                }
+            )
+
+        # sort mới nhất lên đầu: ưu tiên timestamp desc, fallback theo idx asc (entry đầu thường là mới hơn)
+        items.sort(
+            key=lambda x: (
+                -int(x.get("timestamp") or 0),
+                int(x.get("_idx") or 0),
+            )
+        )
+        for it in items:
+            it.pop("_idx", None)
+        return items[:limit]
+    finally:
+        if tmp_cookie is not None:
+            try:
+                tmp_cookie.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _parse_tiktok_follower_count_from_html(html: str) -> Optional[int]:
     """
     Parse followerCount từ HTML TikTok profile page.

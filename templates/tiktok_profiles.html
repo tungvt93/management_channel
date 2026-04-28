@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TikTok Channel Management - Channel Manager</title>
-    <link rel="stylesheet" href="/static/style.css?v=2.2">
+    <link rel="stylesheet" href="/static/style.css?v=2.7">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -48,17 +48,25 @@
                 </form>
             </section>
 
-            <section class="card">
-                <div class="section-header">
+            <section class="card tiktok-list-card">
+                <div class="section-header tiktok-list-header">
                     <h2>TikTok Channel List</h2>
-                    <div class="stats">Total: {{ profiles|length }}</div>
+                    <div class="tiktok-list-actions">
+                        <button type="button" id="btn-sync-tiktok" onclick="syncTikTokProfiles()">Sync dữ liệu</button>
+                        <div class="stats">Total: {{ profiles|length }}</div>
+                    </div>
                 </div>
-                <div class="data-table-container">
+                <div class="data-table-container tiktok-list-table-container">
                     <table class="data-table tiktok-table">
                         <thead>
                             <tr>
                                 <th>Channel URL</th>
                                 <th>Followers</th>
+                                <th>Video 1</th>
+                                <th>Video 2</th>
+                                <th>Video 3</th>
+                                <th>Video 4</th>
+                                <th>Video 5</th>
                                 <th>Note</th>
                                 <th>Người quản lý</th>
                                 <th>Trạng thái upload</th>
@@ -76,6 +84,21 @@
                                 <td>
                                     <span class="badge badge-tiktok">{{ "{:,}".format(profile.followers_count) }}</span>
                                 </td>
+                                {% for v in (profile.latest_videos or []) %}
+                                <td>
+                                    {% set vv = v.get('views') if v is mapping else None %}
+                                    {% set vu = v.get('url') if v is mapping else None %}
+                                    {% if vv is not none and vu %}
+                                        <a href="{{ vu }}" target="_blank" class="item-url" style="font-size:0.85rem;">
+                                            {{ "{:,}".format(vv|int) }}
+                                        </a>
+                                    {% elif vv is not none %}
+                                        <span class="text-muted" style="font-size:0.85rem; margin-left:0;">{{ "{:,}".format(vv|int) }}</span>
+                                    {% else %}
+                                        <span class="text-muted" style="font-size:0.85rem; margin-left:0;">0</span>
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
                                 <td class="note-cell">
                                     {% if profile.note %}
                                         <span class="note-preview text-muted" title="{{ profile.note }}">
@@ -139,7 +162,7 @@
                             {% endfor %}
                             {% if not profiles %}
                             <tr>
-                                <td colspan="7" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                <td colspan="12" style="text-align: center; padding: 4rem; color: var(--text-muted);">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                                     Chưa có kênh nào được thêm.
                                 </td>
@@ -206,6 +229,32 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Import CSV';
+            }
+        }
+    </script>
+
+    <script>
+        async function syncTikTokProfiles() {
+            const btn = document.getElementById("btn-sync-tiktok");
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "Đang sync...";
+            }
+            try {
+                const resp = await fetch("/api/tiktok-profiles/sync", { method: "POST" });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    alert(data.detail || "Sync thất bại");
+                    return;
+                }
+                alert("Đã bắt đầu sync dữ liệu. Vui lòng đợi 1-2 phút rồi tải lại trang.");
+            } catch (e) {
+                alert("Lỗi kết nối khi sync");
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "Sync dữ liệu";
+                }
             }
         }
     </script>
