@@ -807,6 +807,9 @@ async def tiktok_profiles_page(
     # Chuẩn hoá snapshot latest videos để template render dễ (list dài đúng 5)
     import json as _json
     for p in profiles:
+        # Format thời gian upload video mới nhất về giờ HCM để UI hiển thị nhất quán
+        setattr(p, "last_video_published_at_hcm", _fmt_hcm(getattr(p, "last_video_published_at", None)))
+
         items = []
         raw = getattr(p, "latest_videos_json", None)
         if raw:

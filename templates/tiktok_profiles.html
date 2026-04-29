@@ -169,9 +169,9 @@
                                     <span class="badge badge-tiktok">{{ "{:,}".format(profile.followers_count) }}</span>
                                 </td>
                                 <td>
-                                    {% if profile.last_video_published_at %}
+                                    {% if profile.last_video_published_at_hcm %}
                                         <span class="text-muted" style="font-size:0.8rem; margin-left:0;">
-                                            {{ profile.last_video_published_at.strftime('%Y-%m-%d %H:%M') }}
+                                            {{ profile.last_video_published_at_hcm }}
                                         </span>
                                     {% else %}
                                         <span class="text-muted" style="font-size:0.8rem; margin-left:0;">-</span>
