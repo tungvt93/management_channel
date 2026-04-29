@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TikTok Channel Management - Channel Manager</title>
-    <link rel="stylesheet" href="/static/style.css?v=2.9">
+    <link rel="stylesheet" href="/static/style.css?v=3.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -141,6 +141,21 @@
                 </div>
                 <div class="data-table-container tiktok-list-table-container">
                     <table class="data-table tiktok-table">
+                        <colgroup>
+                            <col style="width: 22rem;">
+                            <col style="width: 8rem;">
+                            <col style="width: 10rem;">
+                            <col style="width: 7rem;">
+                            <col style="width: 7rem;">
+                            <col style="width: 7rem;">
+                            <col style="width: 7rem;">
+                            <col style="width: 7rem;">
+                            <col style="width: 22rem;">
+                            <col style="width: 12rem;">
+                            <col style="width: 10.5rem;">
+                            <col style="width: 9rem;">
+                            <col style="width: 12rem;">
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>Channel URL</th>
@@ -239,18 +254,19 @@
                                     <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ profile.created_at.strftime('%Y-%m-%d') }}</span>
                                 </td>
                                 <td style="text-align: right;">
-                                    <button
-                                        type="button"
-                                        class="btn-secondary"
-                                        data-id="{{ profile.id }}"
-                                        data-url="{{ profile.url }}"
-                                        data-note-json='{{ (profile.note or "")|tojson }}'
-                                        onclick="openEditModal(this)"
-                                        style="margin-right: 0.5rem;"
-                                    >Edit</button>
-                                    <form action="/api/tiktok-profiles/{{ profile.id }}/delete" method="POST" style="display:inline;" onsubmit="return confirm('Xác nhận xoá?')">
-                                        <button type="submit" class="btn-danger">Delete</button>
-                                    </form>
+                                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; flex-wrap:nowrap;">
+                                        <button
+                                            type="button"
+                                            class="btn-secondary"
+                                            data-id="{{ profile.id }}"
+                                            data-url="{{ profile.url }}"
+                                            data-note-json='{{ (profile.note or "")|tojson }}'
+                                            onclick="openEditModal(this)"
+                                        >Edit</button>
+                                        <form action="/api/tiktok-profiles/{{ profile.id }}/delete" method="POST" style="display:inline;" onsubmit="return confirm('Xác nhận xoá?')">
+                                            <button type="submit" class="btn-danger">Delete</button>
+                                        </form>
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
