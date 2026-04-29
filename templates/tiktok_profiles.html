@@ -145,6 +145,7 @@
                             <tr>
                                 <th>Channel URL</th>
                                 <th>Followers</th>
+                                <th>Up video cuối</th>
                                 <th>Video 1</th>
                                 <th>Video 2</th>
                                 <th>Video 3</th>
@@ -166,6 +167,15 @@
                                 </td>
                                 <td>
                                     <span class="badge badge-tiktok">{{ "{:,}".format(profile.followers_count) }}</span>
+                                </td>
+                                <td>
+                                    {% if profile.last_video_published_at %}
+                                        <span class="text-muted" style="font-size:0.8rem; margin-left:0;">
+                                            {{ profile.last_video_published_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted" style="font-size:0.8rem; margin-left:0;">-</span>
+                                    {% endif %}
                                 </td>
                                 {% for v in (profile.latest_videos or []) %}
                                 <td>
@@ -246,7 +256,7 @@
                             {% endfor %}
                             {% if not profiles %}
                             <tr>
-                                <td colspan="12" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                <td colspan="13" style="text-align: center; padding: 4rem; color: var(--text-muted);">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                                     Chưa có kênh nào được thêm.
                                 </td>

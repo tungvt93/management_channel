@@ -258,6 +258,39 @@ async def refresh_tiktok_profile_stats_task(profile_id: int, profile_url: str) -
     import json as _json
     from datetime import datetime as _dt, timezone as _tz
 
+    # Lưu thời điểm upload video mới nhất (nếu có timestamp hợp lệ)
+    last_published_at = None
+    try:
+        if latest and isinstance(latest[0], dict):
+            ts0 = latest[0].get("timestamp")
+            if isinstance(ts0, (int, float)) and ts0 > 0:
+                last_published_at = _dt.fromtimestamp(int(ts0), tz=_tz.utc)
+    except Exception:
+        last_published_at = None
+
+    # Fallback: nếu không extract được views/timestamp (TikTok chặn), dùng extract_flat để lấy timestamp/upload_date.
+    if last_published_at is None:
+        try:
+            flat_videos = await get_tiktok_videos(url, cookie_json_text=cookie_json)
+        except Exception as exc:
+            logger.warning("Không lấy được danh sách video (fallback) url=%s: %s", url, exc)
+            flat_videos = []
+        try:
+            best_dt = None
+            for v in flat_videos or []:
+                if not isinstance(v, dict):
+                    continue
+                ud = v.get("upload_date")
+                if not isinstance(ud, _dt):
+                    continue
+                # upload_date trong scraper có thể là naive; coi là UTC để tránh crash.
+                if ud.tzinfo is None:
+                    ud = ud.replace(tzinfo=_tz.utc)
+                best_dt = ud if best_dt is None else max(best_dt, ud)
+            last_published_at = best_dt
+        except Exception:
+            last_published_at = None
+
     async with AsyncSessionLocal() as db:
         await db.execute(
             update(TikTokProfile)
@@ -265,6 +298,7 @@ async def refresh_tiktok_profile_stats_task(profile_id: int, profile_url: str) -
             .values(
                 followers_count=followers,
                 latest_videos_json=_json.dumps(latest, ensure_ascii=False),
+                last_video_published_at=last_published_at,
                 last_synced_at=_dt.now(_tz.utc),
             )
         )

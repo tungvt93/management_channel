@@ -312,14 +312,20 @@ async def get_tiktok_latest_videos_with_views(
 
     def _build_tmp_cookie_from_json() -> Optional[Path]:
         if not cookie_text:
+            logger.info("TikTok: không có cookie (latest_videos_with_views) — thử không cookie")
             return None
         try:
             netscape = _chrome_extension_json_to_netscape(cookie_text)
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError, TypeError, KeyError, ValueError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError, TypeError, KeyError, ValueError) as exc:
+            logger.warning(
+                "TikTok: cookie không đọc/parse được (latest_videos_with_views), bỏ qua cookie: %s",
+                exc,
+            )
             return None
         fd, tmp_name = tempfile.mkstemp(prefix="tiktok_ytdlp_", suffix=".txt", text=True)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(netscape)
+        logger.info("TikTok: yt-dlp (latest_videos_with_views) dùng cookie (%s dòng)", netscape.count("\n") + 1)
         return Path(tmp_name)
 
     def _extract(cookiefile: Optional[str]):

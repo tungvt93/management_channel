@@ -91,6 +91,8 @@ class TikTokProfile(Base):
     followers_count = Column(Integer, default=0)
     # JSON text: [{"url": "...", "views": 123, "timestamp": 1710000000}, ...] (mới nhất trước)
     latest_videos_json = Column(Text, nullable=True)
+    # Thời điểm upload video mới nhất (UTC). Lấy từ `latest_videos_json[0].timestamp` khi sync.
+    last_video_published_at = Column(DateTime(timezone=True), nullable=True)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     note = Column(Text, nullable=True)
     manager = Column(
