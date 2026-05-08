@@ -117,11 +117,22 @@ Phản hồi gồm `channel_id` — dùng để theo dõi trạng thái quét.
 
 `GET /api/channels/{channel_id}/status`
 
+Yêu cầu đăng nhập. Nếu chưa xác thực sẽ trả `401`.
+
 Trả về `scraping_status`, `last_scraped_at`, `scraping_error` (nếu lỗi).
+
+### TikTok Daily Sync (Scraping Manager)
+
+- Hệ thống tự chạy lúc `00:00` mỗi ngày theo múi giờ `Asia/Ho_Chi_Minh`.
+- Nguồn quét: toàn bộ kênh TikTok trong bảng `channels` (tab Scraping Manager).
+- Video đã tồn tại trong `video_links` sẽ được bỏ qua.
+- Video mới sẽ được thêm tự động vào `video_links`.
 
 ### Quét lại kênh
 
 `POST /api/channels/{channel_id}/scrape`
+
+Yêu cầu đăng nhập. Nếu chưa xác thực sẽ trả `401`.
 
 Trả `409` nếu quét đang chạy cho kênh đó.
 

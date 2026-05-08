@@ -10,3 +10,7 @@ yt-dlp
 alembic
 psycopg2-binary
 bcrypt
+apscheduler
+pytest
+pytest-asyncio
+aiosqlite

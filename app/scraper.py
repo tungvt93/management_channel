@@ -18,6 +18,31 @@ logger = logging.getLogger(__name__)
 # Resolve cookie.json from project root (not cwd — uvicorn may start elsewhere).
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_COOKIE_PATH = _PROJECT_ROOT / "cookie.json"
+_PLAYWRIGHT_STABLE_ARGS = [
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--no-sandbox",
+]
+
+# Giới hạn số Playwright/Chromium chạy đồng thời (cron + import CSV + API đều gọi scraper).
+_playwright_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_playwright_semaphore() -> asyncio.Semaphore:
+    global _playwright_semaphore
+    if _playwright_semaphore is None:
+        n = max(1, int(os.getenv("PLAYWRIGHT_MAX_CONCURRENT", "1")))
+        _playwright_semaphore = asyncio.Semaphore(n)
+    return _playwright_semaphore
+
+
+def _is_tiktok_no_videos_error(exc: Exception) -> bool:
+    msg = str(exc or "").lower()
+    return (
+        "does not have any videos posted" in msg
+        or "this account does not have any videos posted" in msg
+        or "no videos posted" in msg
+    )
 
 
 def _chrome_extension_json_to_netscape(cookie_json_text: str) -> str:
@@ -103,61 +128,63 @@ def _read_cookie_json_text(cookie_json_text: Optional[str]) -> Optional[str]:
 
 async def get_youtube_videos(channel_url: str):
     videos = []
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
-        )
-        page = await context.new_page()
-        
-        # Ensure url ends with /shorts
-        if not channel_url.endswith("/shorts"):
-            channel_url = channel_url.rstrip("/") + "/shorts"
-            
-        print(f"Scraping YouTube Shorts from: {channel_url}")
-        await page.goto(channel_url, wait_until="networkidle")
-        
-        try:
-            # Wait for any shorts link to appear
-            await page.wait_for_selector('a[href^="/shorts/"]', timeout=20000)
-        except:
-            print("Timeout waiting for shorts links")
-            await page.screenshot(path="debug_youtube.png")
-            await browser.close()
-            return []
+    async with _get_playwright_semaphore():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=_PLAYWRIGHT_STABLE_ARGS)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                viewport={'width': 1920, 'height': 1080}
+            )
+            page = await context.new_page()
 
-        # Scroll to load all shorts
-        while True:
-            last_height = await page.evaluate("document.documentElement.scrollHeight")
-            await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-            await asyncio.sleep(3) # Wait for content to load
-            new_height = await page.evaluate("document.documentElement.scrollHeight")
-            if new_height == last_height:
-                # Try one more time just in case of slow loading
-                await asyncio.sleep(2)
+            # Ensure url ends with /shorts
+            if not channel_url.endswith("/shorts"):
+                channel_url = channel_url.rstrip("/") + "/shorts"
+
+            print(f"Scraping YouTube Shorts from: {channel_url}")
+            await page.goto(channel_url, wait_until="networkidle")
+
+            try:
+                # Wait for any shorts link to appear
+                await page.wait_for_selector('a[href^="/shorts/"]', timeout=20000)
+            except Exception:
+                print("Timeout waiting for shorts links")
+                await page.screenshot(path="debug_youtube.png")
+                await browser.close()
+                return videos
+
+            # Scroll to load all shorts
+            while True:
+                last_height = await page.evaluate("document.documentElement.scrollHeight")
                 await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-                if await page.evaluate("document.documentElement.scrollHeight") == last_height:
-                    break
-            
-        # Extract shorts elements
-        shorts_links = await page.query_selector_all('a[href^="/shorts/"]')
-        print(f"Found {len(shorts_links)} candidate links")
-        seen_urls = set()
-        for link in shorts_links:
-            url = await link.get_attribute("href")
-            if url and len(url.strip("/")) > 7 and url not in seen_urls:
-                seen_urls.add(url)
-                full_url = f"https://www.youtube.com{url}"
-                videos.append({
-                    "url": full_url,
-                    "upload_date": datetime.now()
-                })
-        
-        print(f"Successfully extracted {len(videos)} unique shorts")
-                
-        await browser.close()
+                await asyncio.sleep(3)  # Wait for content to load
+                new_height = await page.evaluate("document.documentElement.scrollHeight")
+                if new_height == last_height:
+                    # Try one more time just in case of slow loading
+                    await asyncio.sleep(2)
+                    await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                    if await page.evaluate("document.documentElement.scrollHeight") == last_height:
+                        break
+
+            # Extract shorts elements
+            shorts_links = await page.query_selector_all('a[href^="/shorts/"]')
+            print(f"Found {len(shorts_links)} candidate links")
+            seen_urls = set()
+            for link in shorts_links:
+                url = await link.get_attribute("href")
+                if url and len(url.strip("/")) > 7 and url not in seen_urls:
+                    seen_urls.add(url)
+                    full_url = f"https://www.youtube.com{url}"
+                    videos.append({
+                        "url": full_url,
+                        "upload_date": datetime.now()
+                    })
+
+            print(f"Successfully extracted {len(videos)} unique shorts")
+
+            await browser.close()
     return videos
+
 
 def _tiktok_entry_video_url(ent: dict[str, Any], channel_url: str) -> Optional[str]:
     """Lấy URL video chuẩn từ entry flat của yt-dlp (có thể thiếu field `url` ở một số phiên bản)."""
@@ -220,6 +247,18 @@ async def get_tiktok_videos(channel_url: str, cookie_json_text: Optional[str] = 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(channel_url, download=False)
 
+        def _extract_allow_empty(cookiefile: Optional[str]):
+            try:
+                return _extract(cookiefile)
+            except (YoutubeDLError, OSError) as exc:
+                if _is_tiktok_no_videos_error(exc):
+                    logger.info(
+                        "TikTok yt-dlp: tài khoản không có video, trả danh sách rỗng (%s)",
+                        channel_url,
+                    )
+                    return None
+                raise
+
         def _parse_entries(info: Optional[dict]) -> list[dict[str, Any]]:
             if not info:
                 return []
@@ -231,7 +270,7 @@ async def get_tiktok_videos(channel_url: str, cookie_json_text: Optional[str] = 
 
         cookie_path_str = str(tmp_cookie) if tmp_cookie is not None else None
         try:
-            info = await asyncio.to_thread(_extract, cookie_path_str)
+            info = await asyncio.to_thread(_extract_allow_empty, cookie_path_str)
         except (YoutubeDLError, OSError) as first_err:
             if cookie_path_str:
                 logger.warning(
@@ -244,7 +283,7 @@ async def get_tiktok_videos(channel_url: str, cookie_json_text: Optional[str] = 
                     except OSError:
                         pass
                     tmp_cookie = None
-                info = await asyncio.to_thread(_extract, None)
+                info = await asyncio.to_thread(_extract_allow_empty, None)
             else:
                 raise
 
@@ -342,6 +381,18 @@ async def get_tiktok_latest_videos_with_views(
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(profile_url, download=False)
 
+    def _extract_allow_empty(cookiefile: Optional[str]):
+        try:
+            return _extract(cookiefile)
+        except (YoutubeDLError, OSError) as exc:
+            if _is_tiktok_no_videos_error(exc):
+                logger.info(
+                    "TikTok yt-dlp latest: tài khoản không có video, trả danh sách rỗng (%s)",
+                    profile_url,
+                )
+                return None
+            raise
+
     def _parse_entries(info: Optional[dict]) -> list[dict[str, Any]]:
         if not info:
             return []
@@ -355,7 +406,7 @@ async def get_tiktok_latest_videos_with_views(
         tmp_cookie = _build_tmp_cookie_from_json()
         cookie_path_str = str(tmp_cookie) if tmp_cookie is not None else None
         try:
-            info = await asyncio.to_thread(_extract, cookie_path_str)
+            info = await asyncio.to_thread(_extract_allow_empty, cookie_path_str)
         except (YoutubeDLError, OSError):
             if cookie_path_str:
                 if tmp_cookie is not None:
@@ -364,7 +415,7 @@ async def get_tiktok_latest_videos_with_views(
                     except OSError:
                         pass
                     tmp_cookie = None
-                info = await asyncio.to_thread(_extract, None)
+                info = await asyncio.to_thread(_extract_allow_empty, None)
             else:
                 raise
 
@@ -505,38 +556,39 @@ async def get_tiktok_followers_count(profile_url: str, cookie_json_text: Optiona
     if not profile_url:
         return 0
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1365, "height": 768},
-        )
-        # Add cookies nếu có (giúp tránh bị TikTok chặn / trả trang rỗng).
-        try:
-            cookies = _load_tiktok_cookies_for_playwright(cookie_json_text=cookie_json_text)
-            if cookies:
-                await context.add_cookies(cookies)
-        except Exception as exc:
-            logger.warning("TikTok cookies: add_cookies failed (%s)", exc)
-        page = await context.new_page()
-        try:
-            await page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
-            # Đợi thêm một chút để JS hydrate (TikTok thường render muộn).
-            await page.wait_for_timeout(2500)
-            html = await page.content()
-            parsed = _parse_tiktok_follower_count_from_html(html)
-            if parsed is not None:
-                return int(parsed)
-            # Fallback DOM: TikTok hay ẩn JSON nhưng vẫn render metric trên UI.
-            dom_n = await _tiktok_followers_from_dom(page)
-            if dom_n is not None:
-                return int(dom_n)
-            # Fallback: innerText body rồi grep JSON lần nữa.
-            body_text = await page.inner_text("body")
-            parsed2 = _parse_tiktok_follower_count_from_html(body_text)
-            if parsed2 is not None:
-                return int(parsed2)
-            return 0
-        finally:
-            await context.close()
-            await browser.close()
+    async with _get_playwright_semaphore():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=_PLAYWRIGHT_STABLE_ARGS)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1365, "height": 768},
+            )
+            # Add cookies nếu có (giúp tránh bị TikTok chặn / trả trang rỗng).
+            try:
+                cookies = _load_tiktok_cookies_for_playwright(cookie_json_text=cookie_json_text)
+                if cookies:
+                    await context.add_cookies(cookies)
+            except Exception as exc:
+                logger.warning("TikTok cookies: add_cookies failed (%s)", exc)
+            page = await context.new_page()
+            try:
+                await page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
+                # Đợi thêm một chút để JS hydrate (TikTok thường render muộn).
+                await page.wait_for_timeout(2500)
+                html = await page.content()
+                parsed = _parse_tiktok_follower_count_from_html(html)
+                if parsed is not None:
+                    return int(parsed)
+                # Fallback DOM: TikTok hay ẩn JSON nhưng vẫn render metric trên UI.
+                dom_n = await _tiktok_followers_from_dom(page)
+                if dom_n is not None:
+                    return int(dom_n)
+                # Fallback: innerText body rồi grep JSON lần nữa.
+                body_text = await page.inner_text("body")
+                parsed2 = _parse_tiktok_follower_count_from_html(body_text)
+                if parsed2 is not None:
+                    return int(parsed2)
+                return 0
+            finally:
+                await context.close()
+                await browser.close()

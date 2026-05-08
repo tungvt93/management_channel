@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import List, Optional
 
 import uvicorn
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +34,7 @@ from .models import (
     TikTokProfile,
     TikTokCookieSetting,
     TikTokSyncRun,
+    TikTokSyncScheduleSetting,
     TIKTOK_PROFILE_UPLOAD_STATUSES,
 )
 from .scraper import (
@@ -42,6 +45,10 @@ from .scraper import (
 )
 
 logger = logging.getLogger(__name__)
+_HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+_TIKTOK_SYNC_JOB_ID = "tiktok_profiles_sync_cron_job"
+_TIKTOK_CHANNELS_DAILY_JOB_ID = "tiktok_channels_daily_midnight_job"
+_sync_scheduler = AsyncIOScheduler(timezone=_HCM_TZ)
 
 # Đường dẫn gốc dự án (uvicorn có thể chạy với cwd khác — không dùng relative "templates"/"static").
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +121,77 @@ class VideoResponse(BaseModel):
 @app.on_event("startup")
 async def startup():
     await init_db()
+    if not _sync_scheduler.running:
+        _sync_scheduler.start()
+    _register_tiktok_channels_daily_job()
+    await _reload_tiktok_sync_schedule_from_db()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    if _sync_scheduler.running:
+        _sync_scheduler.shutdown(wait=False)
+
+
+def _validate_schedule_time(hour: int, minute: int) -> None:
+    if hour < 0 or hour > 23:
+        raise ValueError("Giờ chạy phải nằm trong khoảng 0-23.")
+    if minute < 0 or minute > 59:
+        raise ValueError("Phút chạy phải nằm trong khoảng 0-59.")
+
+
+async def _apply_tiktok_sync_schedule(enabled: bool, hour: int, minute: int) -> None:
+    """
+    Luôn xóa job cũ trước khi add lại để tránh duplicate job khi đổi lịch.
+    """
+    _validate_schedule_time(hour, minute)
+    old_job = _sync_scheduler.get_job(_TIKTOK_SYNC_JOB_ID)
+    if old_job is not None:
+        _sync_scheduler.remove_job(_TIKTOK_SYNC_JOB_ID)
+    if not enabled:
+        logger.info("TikTok cron schedule disabled")
+        return
+
+    _sync_scheduler.add_job(
+        _run_tiktok_cron_sync_job,
+        trigger=CronTrigger(hour=hour, minute=minute, timezone=_HCM_TZ),
+        id=_TIKTOK_SYNC_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("TikTok cron schedule set to %02d:%02d (HCM)", hour, minute)
+
+
+async def _reload_tiktok_sync_schedule_from_db() -> None:
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(TikTokSyncScheduleSetting).order_by(TikTokSyncScheduleSetting.updated_at.desc())
+        )
+        setting = res.scalars().first()
+    if setting is None:
+        await _apply_tiktok_sync_schedule(enabled=False, hour=7, minute=0)
+        return
+    try:
+        await _apply_tiktok_sync_schedule(
+            enabled=bool(setting.enabled),
+            hour=int(setting.hour or 0),
+            minute=int(setting.minute or 0),
+        )
+    except ValueError:
+        logger.exception("TikTok sync schedule trong DB không hợp lệ; tắt schedule để an toàn.")
+        await _apply_tiktok_sync_schedule(enabled=False, hour=7, minute=0)
+
+
+async def _run_tiktok_cron_sync_job() -> None:
+    async with AsyncSessionLocal() as db:
+        run = TikTokSyncRun(kind="cron", status="running")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        run_id = int(run.id)
+    await refresh_all_tiktok_profiles_stats_task_with_run(run_id)
 
 # Background Task for Scraping
 # Own DB session: the request-scoped session from Depends(get_db) is closed after the response; do not pass it into BackgroundTasks.
@@ -172,6 +250,118 @@ async def scrape_channel_task(channel_id: int, channel_url: str, platform: Platf
                 )
             )
             await db.commit()
+
+
+async def _sync_single_tiktok_channel_videos(
+    db: AsyncSession,
+    channel_id: int,
+    channel_url: str,
+) -> None:
+    await db.execute(
+        update(Channel).where(Channel.id == channel_id).values(
+            scraping_status=ScrapingStatus.IN_PROGRESS,
+            scraping_error=None,
+        )
+    )
+    await db.commit()
+
+    try:
+        cookie_json = await _get_tiktok_cookie_json()
+        videos = await get_tiktok_videos(channel_url, cookie_json_text=cookie_json)
+
+        for idx, video_data in enumerate(videos):
+            if not isinstance(video_data, dict):
+                logger.warning(
+                    "Skip invalid tiktok video item channel_id=%s index=%s: not a dict",
+                    channel_id,
+                    idx,
+                )
+                continue
+            raw_url = video_data.get("url")
+            url = raw_url.strip() if isinstance(raw_url, str) else ""
+            if not url:
+                logger.warning(
+                    "Skip invalid tiktok video item channel_id=%s index=%s: missing url",
+                    channel_id,
+                    idx,
+                )
+                continue
+            exists = await db.execute(select(VideoLink).where(VideoLink.url == url))
+            if exists.scalar_one_or_none():
+                continue
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        VideoLink(
+                            channel_id=channel_id,
+                            url=url,
+                            upload_date=video_data.get("upload_date"),
+                            status=VideoStatus.AVAILABLE,
+                        )
+                    )
+            except IntegrityError:
+                logger.warning("Skip duplicate url=%s", url)
+
+        await db.execute(
+            update(Channel).where(Channel.id == channel_id).values(
+                scraping_status=ScrapingStatus.SUCCESS,
+                last_scraped_at=datetime.now(timezone.utc),
+                scraping_error=None,
+            )
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.exception("Daily sync failed for channel=%s", channel_url)
+        await db.rollback()
+        await db.execute(
+            update(Channel).where(Channel.id == channel_id).values(
+                scraping_status=ScrapingStatus.FAILED,
+                scraping_error=str(exc),
+            )
+        )
+        await db.commit()
+
+
+async def refresh_all_tiktok_channels_videos_daily_task() -> None:
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(Channel.id, Channel.url).where(Channel.platform == Platform.TIKTOK)
+        )
+        rows = res.all()
+
+    for channel_id, channel_url in rows:
+        async with AsyncSessionLocal() as db:
+            try:
+                await _sync_single_tiktok_channel_videos(
+                    db=db,
+                    channel_id=int(channel_id),
+                    channel_url=str(channel_url or ""),
+                )
+            except Exception:
+                logger.exception(
+                    "Daily tiktok channel sync failed channel_id=%s",
+                    channel_id,
+                )
+
+
+async def _run_tiktok_channels_daily_sync_job() -> None:
+    await refresh_all_tiktok_channels_videos_daily_task()
+
+
+def _register_tiktok_channels_daily_job() -> None:
+    old_job = _sync_scheduler.get_job(_TIKTOK_CHANNELS_DAILY_JOB_ID)
+    if old_job is not None:
+        _sync_scheduler.remove_job(_TIKTOK_CHANNELS_DAILY_JOB_ID)
+
+    _sync_scheduler.add_job(
+        _run_tiktok_channels_daily_sync_job,
+        trigger=CronTrigger(hour=0, minute=0, timezone=_HCM_TZ),
+        id=_TIKTOK_CHANNELS_DAILY_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
 
 
 async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: str) -> None:
@@ -799,10 +989,20 @@ async def tiktok_profiles_page(
             return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d %H:%M")
+        return dt.astimezone(_HCM_TZ).strftime("%Y-%m-%d %H:%M")
 
     last_manual_time = _fmt_hcm((last_manual.finished_at if last_manual else None) or (last_manual.started_at if last_manual else None))
     last_cron_time = _fmt_hcm((last_cron.finished_at if last_cron else None) or (last_cron.started_at if last_cron else None))
+
+    schedule_res = await db.execute(
+        select(TikTokSyncScheduleSetting).order_by(TikTokSyncScheduleSetting.updated_at.desc())
+    )
+    schedule_setting = schedule_res.scalars().first()
+    schedule_state = {
+        "enabled": bool(schedule_setting.enabled) if schedule_setting else False,
+        "hour": int(schedule_setting.hour if schedule_setting else 7),
+        "minute": int(schedule_setting.minute if schedule_setting else 0),
+    }
 
     # Chuẩn hoá snapshot latest videos để template render dễ (list dài đúng 5)
     import json as _json
@@ -838,6 +1038,7 @@ async def tiktok_profiles_page(
             "last_cron_sync": last_cron,
             "last_manual_sync_time_hcm": last_manual_time,
             "last_cron_sync_time_hcm": last_cron_time,
+            "schedule_setting": schedule_state,
             "sort": sort_key,
             "manager_filter": manager_filter,
             "status_filter": status_filter,
@@ -898,6 +1099,44 @@ async def sync_tiktok_profiles(background_tasks: BackgroundTasks):
         run_id = int(run.id)
     background_tasks.add_task(refresh_all_tiktok_profiles_stats_task_with_run, run_id)
     return {"ok": True, "started": True, "run_id": run_id}
+
+
+@app.post(
+    "/api/tiktok-sync-schedule",
+    dependencies=[Depends(require_login_api)],
+)
+async def upsert_tiktok_sync_schedule(
+    enabled: Optional[str] = Form(None),
+    hour: int = Form(7),
+    minute: int = Form(0),
+    db: AsyncSession = Depends(get_db),
+):
+    enabled_bool = bool(enabled)
+    try:
+        _validate_schedule_time(hour, minute)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    res = await db.execute(
+        select(TikTokSyncScheduleSetting).order_by(TikTokSyncScheduleSetting.updated_at.desc())
+    )
+    setting = res.scalars().first()
+    if setting:
+        setting.enabled = enabled_bool
+        setting.hour = hour
+        setting.minute = minute
+    else:
+        setting = TikTokSyncScheduleSetting(
+            enabled=enabled_bool,
+            hour=hour,
+            minute=minute,
+        )
+        db.add(setting)
+    await db.commit()
+
+    # Re-apply runtime scheduler: remove old job and create new job (if enabled).
+    await _apply_tiktok_sync_schedule(enabled=enabled_bool, hour=hour, minute=minute)
+    return RedirectResponse("/tiktok-profiles", status_code=303)
 
 @app.post("/api/tiktok-profiles/import")
 async def import_tiktok_profiles(
