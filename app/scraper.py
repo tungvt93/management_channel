@@ -145,13 +145,24 @@ async def get_youtube_videos(channel_url: str):
             await page.goto(channel_url, wait_until="networkidle")
 
             try:
+                # Handle YouTube cookie consent/redirect page if it appears (common in headless/Docker environments)
+                consent_selector = 'button[aria-label*="Accept all"], button[aria-label*="Accept the use"], button[aria-label*="Đồng ý"], button:has-text("Accept all"), button:has-text("Tôi đồng ý"), button:has-text("Accept")'
+                consent_btn = page.locator(consent_selector).first
+                if await consent_btn.is_visible(timeout=3000):
+                    await consent_btn.click()
+                    print("Clicked YouTube cookie consent button")
+                    await page.wait_for_load_state("networkidle")
+            except Exception as e:
+                pass
+
+            try:
                 # Wait for any shorts link to appear
                 await page.wait_for_selector('a[href^="/shorts/"]', timeout=20000)
-            except Exception:
+            except Exception as e:
                 print("Timeout waiting for shorts links")
                 await page.screenshot(path="debug_youtube.png")
                 await browser.close()
-                return videos
+                raise TimeoutError("Timeout waiting for shorts links. Maybe blocked by YouTube bot protection or a cookie consent dialog.") from e
 
             # Scroll to load all shorts
             while True:
