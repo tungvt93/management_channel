@@ -1433,14 +1433,40 @@ async def process_youtube_websub_video(channel_id: str, video_id: str):
             channel.last_video_id = video_id
             await db.commit()
             logger.info(f"Successfully updated YouTube channel {channel.url} last_video_id to Shorts ID {video_id}")
+            
+            # If ngrok_url is configured, trigger the external API call
+            if channel.ngrok_url:
+                ngrok_target = channel.ngrok_url.rstrip("/")
+                api_url = f"{ngrok_target}/api/upload_new_video"
+                logger.info(f"Kênh {channel.url} có ngrok_url, đang gọi API ngoài: {api_url}")
+                
+                import httpx
+                payload = {
+                    "channel_id": channel_id,
+                    "channel_url": channel.url,
+                    "video_id": video_id,
+                    "video_url": f"https://www.youtube.com/shorts/{video_id}"
+                }
+                
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.post(api_url, json=payload)
+                        logger.info(f"API ngrok callback response: status={response.status_code}, body={response.text[:200]}")
+                except Exception as ex:
+                    logger.error(f"Lỗi khi gọi API ngrok ngoài {api_url}: {ex}")
         else:
             logger.warning(f"No YouTube channel entry found in DB with channel_id={channel_id}")
+
+class YoutubeBulkUpdateNgrokRequest(BaseModel):
+    ids: list[int]
+    ngrok_url: Optional[str] = None
 
 @app.post("/api/youtube-channels")
 async def add_youtube_channel(
     background_tasks: BackgroundTasks,
     url: str = Form(...),
     last_video_id: Optional[str] = Form(None),
+    ngrok_url: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(require_login_api),
 ):
@@ -1449,6 +1475,7 @@ async def add_youtube_channel(
         raise HTTPException(status_code=400, detail="Channel URL is required")
     
     last_video_id = (last_video_id or "").strip() or None
+    ngrok_url = (ngrok_url or "").strip() or None
 
     # Check unique url
     stmt = select(YoutubeChannel).where(YoutubeChannel.url == url)
@@ -1456,7 +1483,7 @@ async def add_youtube_channel(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Kênh YouTube đã tồn tại")
 
-    channel = YoutubeChannel(url=url, last_video_id=last_video_id)
+    channel = YoutubeChannel(url=url, last_video_id=last_video_id, ngrok_url=ngrok_url)
     db.add(channel)
     await db.commit()
     await db.refresh(channel)
@@ -1472,6 +1499,7 @@ async def update_youtube_channel(
     background_tasks: BackgroundTasks,
     url: str = Form(...),
     last_video_id: Optional[str] = Form(None),
+    ngrok_url: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(require_login_api),
 ):
@@ -1486,6 +1514,7 @@ async def update_youtube_channel(
         raise HTTPException(status_code=404, detail="Không tìm thấy kênh YouTube")
 
     last_video_id = (last_video_id or "").strip() or None
+    ngrok_url = (ngrok_url or "").strip() or None
     url_changed = channel.url != url
 
     if url_changed:
@@ -1497,12 +1526,35 @@ async def update_youtube_channel(
         channel.channel_id = None # Reset it so the background task resolves it again
 
     channel.last_video_id = last_video_id
+    channel.ngrok_url = ngrok_url
     await db.commit()
 
     if url_changed:
         background_tasks.add_task(youtube_subscribe_task, channel_id, url)
 
     return RedirectResponse("/youtube-channels", status_code=303)
+
+@app.post("/api/youtube-channels/bulk-update-ngrok")
+async def bulk_update_youtube_channels_ngrok(
+    req: YoutubeBulkUpdateNgrokRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="Không có kênh nào được chọn")
+    
+    cleaned_url = (req.ngrok_url or "").strip() or None
+    
+    # Update in bulk
+    stmt = (
+        update(YoutubeChannel)
+        .where(YoutubeChannel.id.in_(req.ids))
+        .values(ngrok_url=cleaned_url)
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"ok": True, "updated_count": len(req.ids)}
+
 
 @app.post("/api/youtube-channels/{channel_id}/delete")
 async def delete_youtube_channel(

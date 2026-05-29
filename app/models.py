@@ -150,6 +150,8 @@ class YoutubeChannel(Base):
     url = Column(String, unique=True, index=True, nullable=False)
     channel_id = Column(String, unique=True, index=True, nullable=True)
     last_video_id = Column(String, nullable=True)
+    ngrok_url = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 
