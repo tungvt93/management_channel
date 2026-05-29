@@ -141,3 +141,15 @@ class TikTokSyncScheduleSetting(Base):
     minute = Column(Integer, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class YoutubeChannel(Base):
+    __tablename__ = "youtube_channels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String, unique=True, index=True, nullable=False)
+    channel_id = Column(String, unique=True, index=True, nullable=True)
+    last_video_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+

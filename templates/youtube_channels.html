@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Channel Management - Channel Manager</title>
+    <link rel="stylesheet" href="/static/style.css?v=3.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Channel Manager</h1>
+            <div class="header-actions">
+                <a href="/logout">Đăng xuất</a>
+            </div>
+        </header>
+
+        <nav>
+            <a href="/" class="{% if active_menu == 'dashboard' %}active{% endif %}">Scraping Manager</a>
+            <a href="/tiktok-profiles" class="{% if active_menu == 'tiktok' %}active{% endif %}">TikTok Channels</a>
+            <a href="/youtube-channels" class="{% if active_menu == 'youtube' %}active{% endif %}">YouTube Channels</a>
+        </nav>
+
+        <div class="grid" style="grid-template-columns: 1fr;">
+            <section class="card">
+                <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
+                    <h2 style="margin:0;">YouTube Channel List</h2>
+                    <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                        <input
+                            id="youtube-search-input"
+                            type="text"
+                            value="{{ search or '' }}"
+                            placeholder="Tìm kiếm link kênh..."
+                            onkeydown="onSearchKeydown(event)"
+                            style="min-width: 250px; background: rgba(30,41,59,0.35); color: white; border: 1px solid var(--border); padding: 0.5rem 0.65rem; border-radius: 0.5rem;"
+                        />
+                        <button type="button" class="btn-secondary" onclick="runSearch()" style="padding: 0.5rem 0.9rem;">Search</button>
+
+                        <select
+                            id="youtube-sort-select"
+                            class="form-select"
+                            onchange="onSortChange(this.value)"
+                            style="background: rgba(30,41,59,0.5); color: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 0.5rem;"
+                        >
+                            <option value="created_desc" {% if sort == 'created_desc' %}selected{% endif %}>Mới nhất</option>
+                            <option value="created_asc" {% if sort == 'created_asc' %}selected{% endif %}>Cũ nhất</option>
+                        </select>
+
+                        <button type="button" onclick="openAddModal()" style="padding: 0.55rem 1.2rem; font-size: 0.85rem;">Thêm kênh mới</button>
+                        <div class="stats">Total: {{ total_count }}</div>
+                    </div>
+                </div>
+
+                <div class="data-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>YouTube Channel URL</th>
+                                <th>YouTube Channel ID</th>
+                                <th>ID Video Cuối Cùng</th>
+                                <th>Added At</th>
+                                <th style="text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for channel in channels %}
+                            <tr>
+                                <td>
+                                    <a href="{{ channel.url }}" target="_blank" class="item-url">{{ channel.url }}</a>
+                                </td>
+                                <td>
+                                    {% if channel.channel_id %}
+                                        <span style="font-size: 0.85rem; font-family: monospace; color: var(--text-muted);">{{ channel.channel_id }}</span>
+                                    {% else %}
+                                        <span class="badge" style="background: rgba(251, 191, 36, 0.1); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.2); font-size: 0.7rem; padding: 0.15rem 0.45rem;">Đang lấy ID...</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if channel.last_video_id %}
+                                        <code style="background: rgba(99, 102, 241, 0.1); color: #818cf8; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.85rem; font-family: monospace;">{{ channel.last_video_id }}</code>
+                                    {% else %}
+                                        <span class="text-muted" style="font-size:0.85rem; margin-left:0;">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="text-muted" style="font-size: 0.8rem; margin-left: 0;">{{ channel.created_at.strftime('%Y-%m-%d') if channel.created_at else '-' }}</span>
+                                </td>
+                                <td style="text-align: right;">
+                                    <div style="display:flex; justify-content:flex-end; gap:0.5rem; flex-wrap:nowrap;">
+                                        <button
+                                            type="button"
+                                            class="btn-secondary"
+                                            data-id="{{ channel.id }}"
+                                            data-url="{{ channel.url }}"
+                                            data-last-video-id="{{ channel.last_video_id or '' }}"
+                                            onclick="openEditModal(this)"
+                                        >Edit</button>
+                                        <form action="/api/youtube-channels/{{ channel.id }}/delete" method="POST" style="display:inline;" onsubmit="return confirm('Xác nhận xoá kênh này?')">
+                                            <button type="submit" class="btn-danger">Delete</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% if not channels %}
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                    <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
+                                    Chưa có kênh YouTube nào được thêm.
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% if total_pages > 1 %}
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top: 0.9rem; flex-wrap:wrap;">
+                    <div class="text-muted" style="margin-left:0; font-size:0.85rem;">
+                        Trang <b>{{ current_page }}</b> / <b>{{ total_pages }}</b>
+                        · Hiển thị <b>{{ channels|length }}</b> / <b>{{ total_count }}</b>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                        {% if current_page > 1 %}
+                            <a class="btn-secondary" style="text-decoration:none;" href="/youtube-channels?search={{ search or '' }}&sort={{ sort or '' }}&page={{ current_page - 1 }}">← Prev</a>
+                        {% else %}
+                            <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">← Prev</span>
+                        {% endif %}
+
+                        {% if current_page < total_pages %}
+                            <a class="btn-secondary" style="text-decoration:none;" href="/youtube-channels?search={{ search or '' }}&sort={{ sort or '' }}&page={{ current_page + 1 }}">Next →</a>
+                        {% else %}
+                            <span class="btn-secondary" style="opacity:0.5; pointer-events:none;">Next →</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div id="add-modal" class="modal-overlay" style="display:none;" onclick="closeAddModal(event)">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="add-modal-title" style="margin:0;">Thêm kênh YouTube</h3>
+                <button type="button" class="btn-secondary" onclick="closeAddModal()">Close</button>
+            </div>
+            <form action="/api/youtube-channels" method="POST" class="form-group" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+                <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <label for="add-url" style="font-weight:600; color:var(--text-muted); font-size:0.9rem;">Link Kênh YouTube</label>
+                    <input type="text" id="add-url" name="url" placeholder="https://youtube.com/@..." required style="width:100%; box-sizing:border-box;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <label for="add-last-video-id" style="font-weight:600; color:var(--text-muted); font-size:0.9rem;">ID Video Cuối Cùng</label>
+                    <input type="text" id="add-last-video-id" name="last_video_id" placeholder="ID video gần nhất (tùy chọn)..." style="width:100%; box-sizing:border-box;">
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+                    <button type="button" class="btn-secondary" onclick="closeAddModal()">Cancel</button>
+                    <button type="submit">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal-overlay" style="display:none;" onclick="closeEditModal(event)">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="edit-modal-title" style="margin:0;">Chỉnh sửa kênh YouTube</h3>
+                <button type="button" class="btn-secondary" onclick="closeEditModal()">Close</button>
+            </div>
+            <form id="edit-form" method="POST" class="form-group" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+                <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <label for="edit-url" style="font-weight:600; color:var(--text-muted); font-size:0.9rem;">Link Kênh YouTube</label>
+                    <input type="text" id="edit-url" name="url" placeholder="https://youtube.com/@..." required style="width:100%; box-sizing:border-box;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <label for="edit-last-video-id" style="font-weight:600; color:var(--text-muted); font-size:0.9rem;">ID Video Cuối Cùng</label>
+                    <input type="text" id="edit-last-video-id" name="last_video_id" placeholder="ID video gần nhất (tùy chọn)..." style="width:100%; box-sizing:border-box;">
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+                    <button type="button" class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+                    <button type="submit">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function runSearch() {
+            const val = (document.getElementById('youtube-search-input')?.value || '').trim();
+            const url = new URL(window.location);
+            if (val) {
+                url.searchParams.set('search', val);
+            } else {
+                url.searchParams.delete('search');
+            }
+            url.searchParams.set('page', 1);
+            window.location.href = url.toString();
+        }
+
+        function onSearchKeydown(e) {
+            if (e.key !== 'Enter') return;
+            runSearch();
+        }
+
+        function onSortChange(sortValue) {
+            const url = new URL(window.location);
+            if (sortValue && sortValue !== 'created_desc') {
+                url.searchParams.set('sort', sortValue);
+            } else {
+                url.searchParams.delete('sort');
+            }
+            url.searchParams.set('page', 1);
+            window.location.href = url.toString();
+        }
+
+        // Add Modal
+        function openAddModal() {
+            const modal = document.getElementById('add-modal');
+            const urlInput = document.getElementById('add-url');
+            const lastVideoInput = document.getElementById('add-last-video-id');
+            
+            urlInput.value = '';
+            lastVideoInput.value = '';
+            
+            modal.style.display = 'flex';
+            setTimeout(() => urlInput.focus(), 0);
+        }
+
+        function closeAddModal(e) {
+            if (e && e.target && e.target.id !== 'add-modal') return;
+            const modal = document.getElementById('add-modal');
+            modal.style.display = 'none';
+        }
+
+        // Edit Modal
+        function openEditModal(btn) {
+            const id = btn.dataset.id;
+            const url = btn.dataset.url || '';
+            const lastVideoId = btn.dataset.lastVideoId || '';
+
+            const modal = document.getElementById('edit-modal');
+            const form = document.getElementById('edit-form');
+            const urlInput = document.getElementById('edit-url');
+            const lastVideoInput = document.getElementById('edit-last-video-id');
+
+            form.action = `/api/youtube-channels/${id}/update`;
+            urlInput.value = url;
+            lastVideoInput.value = lastVideoId;
+
+            modal.style.display = 'flex';
+            setTimeout(() => urlInput.focus(), 0);
+        }
+
+        function closeEditModal(e) {
+            if (e && e.target && e.target.id !== 'edit-modal') return;
+            const modal = document.getElementById('edit-modal');
+            modal.style.display = 'none';
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeAddModal();
+                closeEditModal();
+            }
+        });
+    </script>
+</body>
+</html>

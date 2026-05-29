@@ -603,3 +603,132 @@ async def get_tiktok_followers_count(profile_url: str, cookie_json_text: Optiona
             finally:
                 await context.close()
                 await browser.close()
+
+
+async def get_youtube_channel_id(channel_url: str) -> Optional[str]:
+    """
+    Extracts or resolves the YouTube Channel ID (UC...) from a channel URL.
+    Handles handles (@name), channel paths (/channel/UC...), and custom URLs.
+    """
+    import re
+    import httpx
+
+    url = channel_url.strip()
+    if not url:
+        return None
+
+    # 1. Check if the URL already contains the Channel ID directly
+    match = re.search(r"/channel/(UC[A-Za-z0-9_-]{22})", url)
+    if match:
+        return match.group(1)
+
+    # 2. If it's a handle or custom name, fetch the HTML page to extract channel ID
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=15.0) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.error(f"Failed to fetch YouTube page for {url}: status {resp.status_code}")
+                return None
+            
+            html = resp.text
+
+            # Method A: rss feed link
+            rss_match = re.search(r"feeds/videos\.xml\?channel_id=(UC[A-Za-z0-9_-]{22})", html)
+            if rss_match:
+                return rss_match.group(1)
+
+            # Method B: itemprop meta tag
+            meta_match = re.search(r'<meta itemprop="channelId" content="(UC[A-Za-z0-9_-]{22})"', html)
+            if meta_match:
+                return meta_match.group(1)
+
+            # Method C: JSON browseId/channelId config
+            json_match = re.search(r'"channelId"\s*:\s*"(UC[A-Za-z0-9_-]{22})"', html)
+            if json_match:
+                return json_match.group(1)
+
+            json_browse_match = re.search(r'"browseId"\s*:\s*"(UC[A-Za-z0-9_-]{22})"', html)
+            if json_browse_match:
+                return json_browse_match.group(1)
+
+    except Exception as e:
+        logger.exception(f"Error resolving YouTube channel ID for URL {url}")
+    
+    return None
+
+
+async def subscribe_youtube_pubsub(channel_id: str, callback_base_url: str, mode: str = "subscribe") -> bool:
+    """
+    Subscribes or unsubscribes to a YouTube Channel feed using PubSubHubbub (WebSub).
+    """
+    import httpx
+
+    base_url = callback_base_url.rstrip("/")
+    callback_url = f"{base_url}/api/youtube/pubsub"
+    hub_url = "https://pubsubhubbub.appspot.com/subscribe"
+
+    data = {
+        "hub.callback": callback_url,
+        "hub.topic": f"https://www.youtube.com/xml/feeds/videos.xml?channel_id={channel_id}",
+        "hub.mode": mode,
+        "hub.verify": "async",
+        "hub.lease_seconds": "432000"  # 5 days
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(hub_url, data=data, timeout=10.0)
+            if resp.status_code in (200, 202, 204):
+                logger.info(f"YouTube WebSub {mode} request sent successfully for {channel_id} with callback {callback_url}")
+                return True
+            else:
+                logger.error(f"YouTube WebSub subscription request failed for {channel_id}: {resp.status_code} - {resp.text}")
+                return False
+    except Exception as e:
+        logger.exception(f"Exception during YouTube WebSub subscription for {channel_id}")
+        return False
+
+
+async def is_youtube_short(video_id: str) -> bool:
+    """
+    Checks if a YouTube video is a Short by sending a fast HEAD/GET request.
+    Shorts return 200 OK, while regular videos redirect to /watch?v=...
+    """
+    import httpx
+
+    url = f"https://www.youtube.com/shorts/{video_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=False, timeout=10.0) as client:
+            resp = await client.head(url)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location", "")
+                if "/watch" in location:
+                    return False
+                if "/shorts" in location:
+                    return True
+            
+            # Fallback to GET
+            resp_get = await client.get(url)
+            if resp_get.status_code == 200:
+                return True
+            if resp_get.status_code in (301, 302, 303, 307, 308):
+                location = resp_get.headers.get("Location", "")
+                if "/watch" in location:
+                    return False
+                if "/shorts" in location:
+                    return True
+    except Exception as e:
+        logger.warning(f"Error checking if YouTube video {video_id} is a Short: {e}")
+    
+    return False
+

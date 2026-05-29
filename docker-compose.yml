@@ -28,6 +28,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/postgres
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-use-long-random-string}
+      CALLBACK_BASE_URL: ${CALLBACK_BASE_URL:-}
       # Prod mode (không bind-mount code). Nếu muốn dev hot-reload:
       # - đặt RELOAD="1"
       # - bật lại volume mount ./:/app bên dưới

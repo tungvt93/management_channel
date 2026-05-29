@@ -36,12 +36,16 @@ from .models import (
     TikTokSyncRun,
     TikTokSyncScheduleSetting,
     TIKTOK_PROFILE_UPLOAD_STATUSES,
+    YoutubeChannel,
 )
 from .scraper import (
     get_tiktok_followers_count,
     get_tiktok_latest_videos_with_views,
     get_tiktok_videos,
     get_youtube_videos,
+    get_youtube_channel_id,
+    subscribe_youtube_pubsub,
+    is_youtube_short,
 )
 
 logger = logging.getLogger(__name__)
@@ -1321,5 +1325,281 @@ async def update_tiktok_profile_manager(
     await db.commit()
     return {"ok": True, "profile_id": profile_id, "manager": new_value.value if new_value else None}
 
+@app.get("/youtube-channels")
+async def youtube_channels_page(
+    request: Request,
+    search: Optional[str] = None,
+    sort: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=302)
+    
+    page = int(page or 1)
+    if page < 1:
+        page = 1
+    page_size = int(page_size or 50)
+    if page_size < 5:
+        page_size = 5
+    if page_size > 200:
+        page_size = 200
+
+    sort_key = (sort or "").strip().lower()
+    if sort_key == "created_asc":
+        base_stmt = select(YoutubeChannel).order_by(YoutubeChannel.created_at.asc())
+    else:
+        sort_key = "created_desc"
+        base_stmt = select(YoutubeChannel).order_by(YoutubeChannel.created_at.desc())
+
+    search_term = (search or "").strip()
+    if search_term:
+        base_stmt = base_stmt.where(YoutubeChannel.url.ilike(f"%{search_term}%"))
+
+    total_count_stmt = select(func.count()).select_from(YoutubeChannel)
+    if search_term:
+        total_count_stmt = total_count_stmt.where(YoutubeChannel.url.ilike(f"%{search_term}%"))
+
+    total_count_res = await db.execute(total_count_stmt)
+    total_count = int(total_count_res.scalar() or 0)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+    offset = (page - 1) * page_size
+
+    stmt = base_stmt.limit(page_size).offset(offset)
+    result = await db.execute(stmt)
+    channels = result.scalars().all()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="youtube_channels.html",
+        context={
+            "channels": channels,
+            "current_page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "total_count": total_count,
+            "search": search_term,
+            "sort": sort_key,
+            "active_menu": "youtube",
+        }
+    )
+
+async def youtube_subscribe_task(channel_db_id: int, channel_url: str):
+    # Resolve channel_id (UC...)
+    channel_id = await get_youtube_channel_id(channel_url)
+    if not channel_id:
+        logger.error(f"Could not resolve YouTube Channel ID for URL: {channel_url}")
+        return
+
+    async with AsyncSessionLocal() as db:
+        # Update db record
+        await db.execute(
+            update(YoutubeChannel)
+            .where(YoutubeChannel.id == channel_db_id)
+            .values(channel_id=channel_id)
+        )
+        await db.commit()
+
+        # If CALLBACK_BASE_URL is set, subscribe to WebSub
+        callback_base = os.getenv("CALLBACK_BASE_URL", "").strip()
+        if callback_base:
+            await subscribe_youtube_pubsub(channel_id, callback_base, mode="subscribe")
+        else:
+            logger.warning("CALLBACK_BASE_URL environment variable is not set; skipping YouTube WebSub subscription")
+
+async def process_youtube_websub_video(channel_id: str, video_id: str):
+    """
+    Background task to verify if the video is a YouTube Short,
+    and update the channel's last_video_id if it is.
+    """
+    # 1. Verify if the video is a Short
+    is_short = await is_youtube_short(video_id)
+    logger.info(f"WebSub validation check: video {video_id} is_short={is_short}")
+
+    if not is_short:
+        logger.info(f"Video {video_id} is not a Short, skipping update.")
+        return
+
+    # 2. Update the DB where channel_id matches
+    async with AsyncSessionLocal() as db:
+        stmt = select(YoutubeChannel).where(YoutubeChannel.channel_id == channel_id)
+        res = await db.execute(stmt)
+        channel = res.scalars().first()
+        
+        if channel:
+            channel.last_video_id = video_id
+            await db.commit()
+            logger.info(f"Successfully updated YouTube channel {channel.url} last_video_id to Shorts ID {video_id}")
+        else:
+            logger.warning(f"No YouTube channel entry found in DB with channel_id={channel_id}")
+
+@app.post("/api/youtube-channels")
+async def add_youtube_channel(
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    last_video_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    url = url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Channel URL is required")
+    
+    last_video_id = (last_video_id or "").strip() or None
+
+    # Check unique url
+    stmt = select(YoutubeChannel).where(YoutubeChannel.url == url)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Kênh YouTube đã tồn tại")
+
+    channel = YoutubeChannel(url=url, last_video_id=last_video_id)
+    db.add(channel)
+    await db.commit()
+    await db.refresh(channel)
+
+    # Queue background task to resolve Channel ID and subscribe
+    background_tasks.add_task(youtube_subscribe_task, channel.id, channel.url)
+
+    return RedirectResponse("/youtube-channels", status_code=303)
+
+@app.post("/api/youtube-channels/{channel_id}/update")
+async def update_youtube_channel(
+    channel_id: int,
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    last_video_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    url = url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    stmt = select(YoutubeChannel).where(YoutubeChannel.id == channel_id)
+    result = await db.execute(stmt)
+    channel = result.scalar_one_or_none()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Không tìm thấy kênh YouTube")
+
+    last_video_id = (last_video_id or "").strip() or None
+    url_changed = channel.url != url
+
+    if url_changed:
+        exists_stmt = select(YoutubeChannel.id).where(YoutubeChannel.url == url).where(YoutubeChannel.id != channel_id)
+        exists = await db.execute(exists_stmt)
+        if exists.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=400, detail="Kênh YouTube đã tồn tại với URL này")
+        channel.url = url
+        channel.channel_id = None # Reset it so the background task resolves it again
+
+    channel.last_video_id = last_video_id
+    await db.commit()
+
+    if url_changed:
+        background_tasks.add_task(youtube_subscribe_task, channel_id, url)
+
+    return RedirectResponse("/youtube-channels", status_code=303)
+
+@app.post("/api/youtube-channels/{channel_id}/delete")
+async def delete_youtube_channel(
+    channel_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    stmt = select(YoutubeChannel).where(YoutubeChannel.id == channel_id)
+    result = await db.execute(stmt)
+    channel = result.scalar_one_or_none()
+    if channel:
+        yt_channel_id = channel.channel_id
+        callback_base = os.getenv("CALLBACK_BASE_URL", "").strip()
+        if yt_channel_id and callback_base:
+            background_tasks.add_task(subscribe_youtube_pubsub, yt_channel_id, callback_base, "unsubscribe")
+
+        await db.delete(channel)
+        await db.commit()
+
+    return RedirectResponse("/youtube-channels", status_code=303)
+
+@app.get("/api/youtube/pubsub")
+async def youtube_pubsub_verify(
+    request: Request,
+):
+    """
+    YouTube WebSub (PubSubHubbub) Verification of Intent callback handler.
+    YouTube sends GET challenge to verify active subscription.
+    """
+    params = request.query_params
+    mode = params.get("hub.mode")
+    topic = params.get("hub.topic")
+    challenge = params.get("hub.challenge")
+    lease = params.get("hub.lease_seconds")
+
+    logger.info(f"YouTube WebSub verification request received: mode={mode}, topic={topic}, lease={lease}")
+
+    if mode in ("subscribe", "unsubscribe") and challenge:
+        from fastapi.responses import Response
+        return Response(content=challenge, media_type="text/plain")
+
+    raise HTTPException(status_code=400, detail="Invalid verification request")
+
+@app.post("/api/youtube/pubsub")
+async def youtube_pubsub_callback(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """
+    YouTube WebSub (PubSubHubbub) feed notification endpoint.
+    Receives XML data when a new video is published.
+    """
+    body = await request.body()
+    logger.info(f"YouTube WebSub feed notification received: {len(body)} bytes")
+
+    try:
+        import xml.etree.ElementTree as ET
+        
+        root = ET.fromstring(body)
+        
+        namespaces = {
+            "atom": "http://www.w3.org/2005/Atom",
+            "yt": "http://www.youtube.com/xml/schemas/2015"
+        }
+        
+        entry = root.find("atom:entry", namespaces)
+        if entry is None:
+            entry = root.find("entry")
+            
+        if entry is not None:
+            video_id_el = entry.find("yt:videoId", namespaces)
+            if video_id_el is None:
+                video_id_el = entry.find("videoId")
+                
+            channel_id_el = entry.find("yt:channelId", namespaces)
+            if channel_id_el is None:
+                channel_id_el = entry.find("channelId")
+                
+            if video_id_el is not None and channel_id_el is not None:
+                video_id = video_id_el.text.strip()
+                channel_id = channel_id_el.text.strip()
+                
+                logger.info(f"WebSub parsed new video: {video_id} for channel: {channel_id}")
+                
+                background_tasks.add_task(process_youtube_websub_video, channel_id, video_id)
+            else:
+                logger.warning("WebSub XML entry missing videoId or channelId")
+        else:
+            logger.warning("WebSub XML missing entry tag")
+
+    except Exception as e:
+        logger.exception("Error processing YouTube WebSub XML notification payload")
+
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
