@@ -32,6 +32,3 @@ jobs:
    
 
             CALLBACK_BASE_URL="${{ vars.CALLBACK_BASE_URL }}" docker compose up -d --build
-
-            # Run migrations explicitly (non-interactive)
-            docker compose exec -T web alembic upgrade head
