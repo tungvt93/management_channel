@@ -31,4 +31,4 @@ jobs:
             git reset --hard origin/main
    
 
-            CALLBACK_BASE_URL="${{ vars.CALLBACK_BASE_URL }}" docker compose up -d --build
+            CALLBACK_BASE_URL="${{ secrets.CALLBACK_BASE_URL || vars.CALLBACK_BASE_URL }}" docker compose up -d --build
