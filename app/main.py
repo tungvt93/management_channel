@@ -1157,7 +1157,6 @@ async def import_tiktok_profiles(
     # We'll skip header if it looks like one.
     
     imported_count = 0
-    updated_followers_count = 0
     for row in reader:
         if not row or len(row) < 1:
             continue
@@ -1174,25 +1173,15 @@ async def import_tiktok_profiles(
         if result.scalar_one_or_none():
             continue
 
-        followers_count = 0
-        try:
-            followers_count = int(await get_tiktok_followers_count(url))
-        except Exception as exc:
-            logger.warning("Không lấy được followers cho %s: %s", url, exc)
-            followers_count = 0
-
-        profile = TikTokProfile(url=url, note=note, followers_count=followers_count)
+        profile = TikTokProfile(url=url, note=note, followers_count=0)
         db.add(profile)
         imported_count += 1
-        if followers_count > 0:
-            updated_followers_count += 1
         
-    await db.commit()
+    if imported_count > 0:
+        await db.commit()
+        
     return {
-        "message": (
-            f"Successfully imported {imported_count} profiles "
-            f"(follower checked: {updated_followers_count}/{imported_count})."
-        )
+        "message": f"Successfully imported {imported_count} profiles."
     }
 
 @app.post("/api/tiktok-profiles")
@@ -1412,18 +1401,16 @@ async def youtube_subscribe_task(channel_db_id: int, channel_url: str):
 
 async def process_youtube_websub_video(channel_id: str, video_id: str):
     """
-    Background task to verify if the video is a YouTube Short,
-    and update the channel's last_video_id if it is.
+    Background task to update the channel's last_video_id and trigger external API
+    for both YouTube Shorts and regular videos.
     """
-    # 1. Verify if the video is a Short
+    # Verify if the video is a Short to determine correct URL format
     is_short = await is_youtube_short(video_id)
     logger.info(f"WebSub validation check: video {video_id} is_short={is_short}")
 
-    if not is_short:
-        logger.info(f"Video {video_id} is not a Short, skipping update.")
-        return
+    video_url = f"https://www.youtube.com/shorts/{video_id}" if is_short else f"https://www.youtube.com/watch?v={video_id}"
 
-    # 2. Update the DB where channel_id matches
+    # Update the DB where channel_id matches
     async with AsyncSessionLocal() as db:
         stmt = select(YoutubeChannel).where(YoutubeChannel.channel_id == channel_id)
         res = await db.execute(stmt)
@@ -1432,7 +1419,7 @@ async def process_youtube_websub_video(channel_id: str, video_id: str):
         if channel:
             channel.last_video_id = video_id
             await db.commit()
-            logger.info(f"Successfully updated YouTube channel {channel.url} last_video_id to Shorts ID {video_id}")
+            logger.info(f"Successfully updated YouTube channel {channel.url} last_video_id to {video_id}")
             
             # If ngrok_url is configured, trigger the external API call
             if channel.ngrok_url:
@@ -1445,7 +1432,7 @@ async def process_youtube_websub_video(channel_id: str, video_id: str):
                     "channel_id": channel_id,
                     "channel_url": channel.url,
                     "video_id": video_id,
-                    "video_url": f"https://www.youtube.com/shorts/{video_id}"
+                    "video_url": video_url
                 }
                 
                 try:
