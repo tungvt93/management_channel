@@ -90,7 +90,7 @@
                         <thead>
                             <tr>
                                 <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-checkbox" onclick="toggleSelectAll(this)" style="cursor: pointer; transform: scale(1.15);"></th>
-                                <th>YouTube Channel URL</th>
+                                <th style="width: 220px; min-width: 220px; max-width: 220px;">YouTube Channel URL</th>
                                 <th>YouTube Channel ID</th>
                                 <th>ID Video Cuối Cùng</th>
                                 <th>Link Ngrok</th>
@@ -104,8 +104,8 @@
                                 <td style="text-align: center;">
                                     <input type="checkbox" class="channel-row-checkbox" value="{{ channel.id }}" onclick="onRowCheckboxChange()" style="cursor: pointer; transform: scale(1.15);">
                                 </td>
-                                <td>
-                                    <a href="{{ channel.url }}" target="_blank" class="item-url">{{ channel.url }}</a>
+                                <td style="width: 220px; min-width: 220px; max-width: 220px;">
+                                    <a href="{{ channel.url }}" target="_blank" class="item-url" style="display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ channel.url }}">{{ channel.url }}</a>
                                 </td>
                                 <td>
                                     {% if channel.channel_id %}
