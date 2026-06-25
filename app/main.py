@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 _HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 _TIKTOK_SYNC_JOB_ID = "tiktok_profiles_sync_cron_job"
 _TIKTOK_CHANNELS_DAILY_JOB_ID = "tiktok_channels_daily_midnight_job"
+_YOUTUBE_PUBSUB_RENEW_JOB_ID = "youtube_pubsub_weekly_renew_job"
 _sync_scheduler = AsyncIOScheduler(timezone=_HCM_TZ)
 
 # Đường dẫn gốc dự án (uvicorn có thể chạy với cwd khác — không dùng relative "templates"/"static").
@@ -128,6 +129,7 @@ async def startup():
     if not _sync_scheduler.running:
         _sync_scheduler.start()
     _register_tiktok_channels_daily_job()
+    _register_youtube_pubsub_renew_job()
     await _reload_tiktok_sync_schedule_from_db()
 
 
@@ -366,6 +368,53 @@ def _register_tiktok_channels_daily_job() -> None:
         coalesce=True,
         misfire_grace_time=300,
     )
+
+
+async def _run_youtube_pubsub_renew_job() -> None:
+    """Renew tất cả YouTube PubSubHubbub subscriptions (chạy 0h thứ 2 hàng tuần)."""
+    callback_base = os.getenv("CALLBACK_BASE_URL", "").strip()
+    if not callback_base:
+        logger.warning("CALLBACK_BASE_URL not set; skipping YouTube PubSubHubbub weekly renew")
+        return
+
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(YoutubeChannel).where(YoutubeChannel.channel_id.isnot(None))
+        )
+        channels = res.scalars().all()
+
+    if not channels:
+        logger.info("YouTube PubSubHubbub renew: không có channel nào để renew")
+        return
+
+    logger.info("YouTube PubSubHubbub renew: bắt đầu renew %d channel", len(channels))
+    success = 0
+    for ch in channels:
+        try:
+            ok = await subscribe_youtube_pubsub(ch.channel_id, callback_base, mode="subscribe")
+            if ok:
+                success += 1
+        except Exception:
+            logger.exception("YouTube PubSubHubbub renew failed for channel_id=%s", ch.channel_id)
+
+    logger.info("YouTube PubSubHubbub renew: %d/%d thành công", success, len(channels))
+
+
+def _register_youtube_pubsub_renew_job() -> None:
+    old_job = _sync_scheduler.get_job(_YOUTUBE_PUBSUB_RENEW_JOB_ID)
+    if old_job is not None:
+        _sync_scheduler.remove_job(_YOUTUBE_PUBSUB_RENEW_JOB_ID)
+
+    _sync_scheduler.add_job(
+        _run_youtube_pubsub_renew_job,
+        trigger=CronTrigger(day_of_week="mon", hour=0, minute=0, timezone=_HCM_TZ),
+        id=_YOUTUBE_PUBSUB_RENEW_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("YouTube PubSubHubbub renew job registered: 0h thứ 2 hàng tuần (HCM)")
 
 
 async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: str) -> None:
