@@ -8,6 +8,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        .bulk-action-active {
+            display: flex !important;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -140,9 +145,26 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Bulk Actions Bar -->
+                <div id="bulk-actions-bar" style="display: none; background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span style="font-size: 1.5rem;">⚡️</span>
+                        <div>
+                            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: white;">Tác vụ hàng loạt</h4>
+                            <p style="margin: 0; font-size: 0.8rem; color: var(--text-muted);">Đang chọn <b id="selected-count" style="color: #fca5a5;">0</b> kênh TikTok</p>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end;">
+                        <button type="button" class="btn-danger" onclick="deleteSelectedProfiles()" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">Xóa đã chọn</button>
+                        <button type="button" class="btn-secondary" onclick="clearSelection()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Huỷ chọn</button>
+                    </div>
+                </div>
+
                 <div class="data-table-container tiktok-list-table-container">
                     <table class="data-table tiktok-table">
                         <colgroup>
+                            <col style="width: 2.5rem;">
                             <col style="width: 22rem;">
                             <col style="width: 8rem;">
                             <col style="width: 10rem;">
@@ -159,6 +181,7 @@
                         </colgroup>
                         <thead>
                             <tr>
+                                <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-checkbox" onclick="toggleSelectAll(this)" style="cursor: pointer; transform: scale(1.15);"></th>
                                 <th>Channel URL</th>
                                 <th>Followers</th>
                                 <th>Up video cuối</th>
@@ -178,6 +201,9 @@
                             {% for profile in profiles %}
                             {% set us = profile.upload_status if profile.upload_status else 'cho_up' %}
                             <tr>
+                                <td style="text-align: center;">
+                                    <input type="checkbox" class="tiktok-row-checkbox" value="{{ profile.id }}" onclick="onRowCheckboxChange()" style="cursor: pointer; transform: scale(1.15);">
+                                </td>
                                 <td>
                                     <a href="{{ profile.url }}" target="_blank" class="item-url">{{ profile.url }}</a>
                                 </td>
@@ -273,7 +299,7 @@
                             {% endfor %}
                             {% if not profiles %}
                             <tr>
-                                <td colspan="13" style="text-align: center; padding: 4rem; color: var(--text-muted);">
+                                <td colspan="14" style="text-align: center; padding: 4rem; color: var(--text-muted);">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
                                     Chưa có kênh nào được thêm.
                                 </td>
@@ -463,6 +489,80 @@
                 }
             });
         });
+    </script>
+
+    <script>
+        // Checkboxes & Bulk Actions
+        function toggleSelectAll(selectAllCheckbox) {
+            const checkboxes = document.querySelectorAll('.tiktok-row-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = selectAllCheckbox.checked;
+            });
+            onRowCheckboxChange();
+        }
+
+        function onRowCheckboxChange() {
+            const checkboxes = document.querySelectorAll('.tiktok-row-checkbox');
+            const selectedIds = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+            
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = checkboxes.length > 0 && selectedIds.length === checkboxes.length;
+            }
+            
+            const bulkBar = document.getElementById('bulk-actions-bar');
+            const selectedCountSpan = document.getElementById('selected-count');
+            
+            if (selectedIds.length > 0) {
+                if (selectedCountSpan) selectedCountSpan.textContent = selectedIds.length;
+                if (bulkBar) bulkBar.classList.add('bulk-action-active');
+            } else {
+                if (bulkBar) bulkBar.classList.remove('bulk-action-active');
+            }
+        }
+
+        function clearSelection() {
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (selectAllCheckbox) selectAllCheckbox.checked = false;
+            
+            const checkboxes = document.querySelectorAll('.tiktok-row-checkbox');
+            checkboxes.forEach(cb => cb.checked = false);
+            
+            onRowCheckboxChange();
+        }
+
+        async function deleteSelectedProfiles() {
+            const checkboxes = document.querySelectorAll('.tiktok-row-checkbox');
+            const selectedIds = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+            
+            if (selectedIds.length === 0) {
+                alert('Vui lòng chọn ít nhất 1 kênh TikTok');
+                return;
+            }
+
+            if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} kênh TikTok đã chọn?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/tiktok-profiles/batch-delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids: selectedIds })
+                });
+
+                const data = await response.json().catch(() => ({}));
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Lỗi khi xóa: ' + (data.detail || 'Không thể xóa các kênh đã chọn'));
+                }
+            } catch (err) {
+                alert('Lỗi kết nối khi xóa các kênh đã chọn');
+            }
+        }
     </script>
 
     <!-- Edit Modal -->

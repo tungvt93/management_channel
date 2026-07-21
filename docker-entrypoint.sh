@@ -15,8 +15,8 @@ done
 echo "Running migrations..."
 alembic upgrade head
 
-echo "Running YouTube PubSubHubbub renew on startup..."
-python /app/scripts/run_pubsub_renew.py || echo "Warning: YouTube PubSubHubbub renew failed but continuing..."
+echo "Running YouTube PubSubHubbub renew in background..."
+nohup python /app/scripts/run_pubsub_renew.py > /var/log/pubsub_renew.log 2>&1 &
 
 if [ ! -f /app/scripts/update_tiktok_followers.py ]; then
   echo "Generating missing scripts/update_tiktok_followers.py..."

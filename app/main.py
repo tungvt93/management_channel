@@ -1265,6 +1265,24 @@ async def add_tiktok_profile(
         )
     return RedirectResponse("/tiktok-profiles", status_code=303)
 
+class TikTokBatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/tiktok-profiles/batch-delete")
+async def batch_delete_tiktok_profiles(
+    req: TikTokBatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(require_login_api),
+):
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="Không có kênh nào được chọn")
+
+    await db.execute(delete(TikTokProfile).where(TikTokProfile.id.in_(req.ids)))
+    await db.commit()
+    return {"status": "ok", "deleted_count": len(req.ids)}
+
+
 @app.post("/api/tiktok-profiles/{profile_id}/delete")
 async def delete_tiktok_profile(
     profile_id: int,
@@ -1274,6 +1292,7 @@ async def delete_tiktok_profile(
     await db.execute(delete(TikTokProfile).where(TikTokProfile.id == profile_id))
     await db.commit()
     return RedirectResponse("/tiktok-profiles", status_code=303)
+
 
 
 @app.post("/api/tiktok-profiles/{profile_id}/update")
