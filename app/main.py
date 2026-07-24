@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 _HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 _TIKTOK_SYNC_JOB_ID = "tiktok_profiles_sync_cron_job"
 _TIKTOK_CHANNELS_DAILY_JOB_ID = "tiktok_channels_daily_midnight_job"
-_YOUTUBE_PUBSUB_RENEW_JOB_ID = "youtube_pubsub_weekly_renew_job"
+_YOUTUBE_PUBSUB_RENEW_JOB_ID = "youtube_pubsub_daily_renew_job"
 _sync_scheduler = AsyncIOScheduler(timezone=_HCM_TZ)
 
 # Đường dẫn gốc dự án (uvicorn có thể chạy với cwd khác — không dùng relative "templates"/"static").
@@ -371,10 +371,10 @@ def _register_tiktok_channels_daily_job() -> None:
 
 
 async def _run_youtube_pubsub_renew_job() -> None:
-    """Renew tất cả YouTube PubSubHubbub subscriptions (chạy 0h thứ 2 hàng tuần)."""
+    """Renew tất cả YouTube PubSubHubbub subscriptions (chạy hàng ngày vào 0h)."""
     callback_base = os.getenv("CALLBACK_BASE_URL", "").strip()
     if not callback_base:
-        logger.warning("CALLBACK_BASE_URL not set; skipping YouTube PubSubHubbub weekly renew")
+        logger.warning("CALLBACK_BASE_URL not set; skipping YouTube PubSubHubbub daily renew")
         return
 
     async with AsyncSessionLocal() as db:
@@ -407,14 +407,14 @@ def _register_youtube_pubsub_renew_job() -> None:
 
     _sync_scheduler.add_job(
         _run_youtube_pubsub_renew_job,
-        trigger=CronTrigger(day_of_week="mon", hour=0, minute=0, timezone=_HCM_TZ),
+        trigger=CronTrigger(hour=0, minute=0, timezone=_HCM_TZ),
         id=_YOUTUBE_PUBSUB_RENEW_JOB_ID,
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=300,
     )
-    logger.info("YouTube PubSubHubbub renew job registered: 0h thứ 2 hàng tuần (HCM)")
+    logger.info("YouTube PubSubHubbub renew job registered: Hàng ngày vào 0h (HCM)")
 
 
 async def refresh_tiktok_profile_followers_task(profile_id: int, profile_url: str) -> None:
