@@ -9,7 +9,7 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request, UploadFile, File
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -1515,6 +1515,134 @@ async def process_youtube_websub_video(channel_id: str, video_id: str):
 class YoutubeBulkUpdateNgrokRequest(BaseModel):
     ids: list[int]
     ngrok_url: Optional[str] = None
+
+
+class AddYoutubeChannelApiRequest(BaseModel):
+    url: Optional[str] = None
+    shorts_url: Optional[str] = None
+    channel_url: Optional[str] = None
+    ngrok_url: Optional[str] = None
+
+
+@app.post("/api/youtube-channels/add")
+@app.post("/api/youtube/add-channel")
+async def add_youtube_channel_api(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    req: Optional[AddYoutubeChannelApiRequest] = None,
+):
+    """
+    API endpoint để thêm kênh YouTube (truyền link shorts của kênh và link ngrok).
+    Trả về JSON với status 'success' hoặc 'error' kèm message.
+    """
+    try:
+        url = None
+        ngrok_url = None
+
+        if req:
+            url = req.shorts_url or req.url or req.channel_url
+            ngrok_url = req.ngrok_url
+
+        if not url or not ngrok_url:
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    import json
+                    json_data = json.loads(body_bytes.decode("utf-8"))
+                    if isinstance(json_data, dict):
+                        if not url:
+                            url = json_data.get("shorts_url") or json_data.get("url") or json_data.get("channel_url")
+                        if not ngrok_url:
+                            ngrok_url = json_data.get("ngrok_url")
+            except Exception:
+                pass
+
+        if not url or not ngrok_url:
+            try:
+                form_data = await request.form()
+                if not url:
+                    url = form_data.get("shorts_url") or form_data.get("url") or form_data.get("channel_url")
+                if not ngrok_url:
+                    ngrok_url = form_data.get("ngrok_url")
+            except Exception:
+                pass
+
+        if not url:
+            url = request.query_params.get("shorts_url") or request.query_params.get("url") or request.query_params.get("channel_url")
+        if not ngrok_url:
+            ngrok_url = request.query_params.get("ngrok_url")
+
+        url = (url or "").strip()
+        ngrok_url = (ngrok_url or "").strip() or None
+
+        if not url:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "success": False,
+                    "message": "Thiếu link kênh YouTube. Vui lòng truyền 'shorts_url' hoặc 'url'.",
+                },
+            )
+
+        if "youtube.com" not in url.lower() and "youtu.be" not in url.lower():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "success": False,
+                    "message": "Link không hợp lệ. Phải là đường dẫn YouTube (ví dụ: https://www.youtube.com/@Cyclewrld2/shorts).",
+                },
+            )
+
+        # Kiểm tra trùng URL kênh
+        stmt = select(YoutubeChannel).where(YoutubeChannel.url == url)
+        result = await db.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if existing:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "success": False,
+                    "message": f"Kênh YouTube '{url}' đã tồn tại trong hệ thống.",
+                },
+            )
+
+        channel = YoutubeChannel(url=url, ngrok_url=ngrok_url)
+        db.add(channel)
+        await db.commit()
+        await db.refresh(channel)
+
+        # Queue background task để lấy channel_id (UC...) và subscribe WebSub PubSub
+        background_tasks.add_task(youtube_subscribe_task, channel.id, channel.url)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "success": True,
+                "message": "Thêm kênh YouTube thành công",
+                "data": {
+                    "id": channel.id,
+                    "url": channel.url,
+                    "ngrok_url": channel.ngrok_url,
+                    "channel_id": channel.channel_id,
+                },
+            },
+        )
+    except Exception as e:
+        logger.exception("Lỗi khi thêm YouTube channel qua API")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "success": False,
+                "message": f"Lỗi hệ thống: {str(e)}",
+            },
+        )
+
 
 @app.post("/api/youtube-channels")
 async def add_youtube_channel(
