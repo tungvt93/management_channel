@@ -1644,6 +1644,137 @@ async def add_youtube_channel_api(
         )
 
 
+class UpdateNgrokUrlApiRequest(BaseModel):
+    old_ngrok_url: Optional[str] = None
+    old_url: Optional[str] = None
+    ngrok_url: Optional[str] = None
+    new_ngrok_url: Optional[str] = None
+    new_url: Optional[str] = None
+
+
+@app.post("/api/youtube-channels/update-ngrok")
+@app.post("/api/youtube/update-ngrok-url")
+@app.put("/api/youtube-channels/update-ngrok")
+@app.put("/api/youtube/update-ngrok-url")
+async def update_ngrok_url_api(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    req: Optional[UpdateNgrokUrlApiRequest] = None,
+):
+    """
+    API endpoint public để tìm kiếm tất cả bản ghi có ngrok_url cũ và cập nhật sang ngrok_url mới.
+    Hỗ trợ phương thức POST và PUT, nhận JSON body / Form data / Query params.
+    """
+    try:
+        old_ngrok_url = None
+        new_ngrok_url = None
+
+        if req:
+            old_ngrok_url = req.old_ngrok_url or req.old_url or req.ngrok_url
+            new_ngrok_url = req.new_ngrok_url or req.new_url
+
+        if not old_ngrok_url or not new_ngrok_url:
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    import json
+                    json_data = json.loads(body_bytes.decode("utf-8"))
+                    if isinstance(json_data, dict):
+                        if not old_ngrok_url:
+                            old_ngrok_url = json_data.get("old_ngrok_url") or json_data.get("old_url") or json_data.get("ngrok_url")
+                        if not new_ngrok_url:
+                            new_ngrok_url = json_data.get("new_ngrok_url") or json_data.get("new_url")
+            except Exception:
+                pass
+
+        if not old_ngrok_url or not new_ngrok_url:
+            try:
+                form_data = await request.form()
+                if not old_ngrok_url:
+                    old_ngrok_url = form_data.get("old_ngrok_url") or form_data.get("old_url") or form_data.get("ngrok_url")
+                if not new_ngrok_url:
+                    new_ngrok_url = form_data.get("new_ngrok_url") or form_data.get("new_url")
+            except Exception:
+                pass
+
+        if not old_ngrok_url:
+            old_ngrok_url = request.query_params.get("old_ngrok_url") or request.query_params.get("old_url") or request.query_params.get("ngrok_url")
+        if not new_ngrok_url:
+            new_ngrok_url = request.query_params.get("new_ngrok_url") or request.query_params.get("new_url")
+
+        old_ngrok_url = (old_ngrok_url or "").strip()
+        new_ngrok_url = (new_ngrok_url or "").strip()
+
+        if not old_ngrok_url:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "success": False,
+                    "message": "Thiếu ngrok_url cũ để tìm kiếm. Vui lòng truyền 'old_ngrok_url' hoặc 'ngrok_url'.",
+                },
+            )
+
+        if not new_ngrok_url:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "success": False,
+                    "message": "Thiếu ngrok_url mới để cập nhật. Vui lòng truyền 'new_ngrok_url'.",
+                },
+            )
+
+        old_stripped = old_ngrok_url.rstrip("/")
+        old_with_slash = old_stripped + "/"
+
+        # Tìm và đếm số bản ghi khớp
+        count_stmt = select(func.count()).select_from(YoutubeChannel).where(
+            (YoutubeChannel.ngrok_url == old_ngrok_url) |
+            (YoutubeChannel.ngrok_url == old_stripped) |
+            (YoutubeChannel.ngrok_url == old_with_slash)
+        )
+        count_res = await db.execute(count_stmt)
+        matched_count = count_res.scalar() or 0
+
+        # Cập nhật ngrok_url mới
+        update_stmt = (
+            update(YoutubeChannel)
+            .where(
+                (YoutubeChannel.ngrok_url == old_ngrok_url) |
+                (YoutubeChannel.ngrok_url == old_stripped) |
+                (YoutubeChannel.ngrok_url == old_with_slash)
+            )
+            .values(ngrok_url=new_ngrok_url)
+        )
+        await db.execute(update_stmt)
+        await db.commit()
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "success": True,
+                "message": f"Cập nhật ngrok_url thành công cho {matched_count} kênh YouTube.",
+                "data": {
+                    "old_ngrok_url": old_ngrok_url,
+                    "new_ngrok_url": new_ngrok_url,
+                    "updated_count": matched_count,
+                },
+            },
+        )
+    except Exception as e:
+        logger.exception("Lỗi khi cập nhật ngrok_url kênh YouTube qua API")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "success": False,
+                "message": f"Lỗi hệ thống: {str(e)}",
+            },
+        )
+
+
 @app.post("/api/youtube-channels")
 async def add_youtube_channel(
     background_tasks: BackgroundTasks,
